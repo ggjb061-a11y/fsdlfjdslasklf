@@ -29,7 +29,7 @@ fi
 if [ "$PM" = "apt" ]; then
     echo "[*] Updating apt cache..."
     apt-get update -qq
-    PKGS="nmap nikto whois dnsutils curl openssl python3 python3-pip"
+    PKGS="nmap nikto whois dnsutils curl openssl python3 python3-pip sqlmap"
     for pkg in $PKGS; do
         if dpkg -s "$pkg" &>/dev/null; then
             ok "$pkg already installed"

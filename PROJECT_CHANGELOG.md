@@ -2,6 +2,43 @@
 
 Version numbers follow the project's own `scanner/__init__.py::__version__`.
 
+## 3.5.0 (2026-10-03) - sqlmap integration (second-stage SQLi confirmation)
+
+### Added
+- **SqlmapCheck** (`scanner/checks/sqlmap_scan.py`): new check that runs
+  after the built-in `SQLInjectionCheck`. If `sqlmap` is on PATH, it
+  invokes it against live hosts (with sentinel `?id=1` params) and any
+  discovered parametric URLs. Parses sqlmap stdout for every
+  `Parameter: / Type: / Title: / Payload:` triple and emits a critical
+  finding per technique with `sqli`+`sqlmap`+`confirmed`+<technique> tags.
+
+  Flags used:
+  `--batch --level=3 --risk=2 --random-agent --technique=BEUSTQ
+   --threads=5 --timeout=10 --flush-session --crawl=0 --skip-waf
+   --output-dir <vuln>/sqlmap`
+
+  Candidate URL list capped at 15 to keep runtime bounded.
+  Degrades silently if sqlmap is absent (built-in SQLi check still runs).
+
+- Added `sqlmap` to `setup.sh` apt install list.
+- Added `sqlmap` to `ALL_TOOLS` tool-availability dashboard.
+
+### Tests (117 passing)
+- `test_sqlmap.py`:
+  - Parses sqlmap output with multiple Type/Title/Payload triples under
+    one `Parameter:` block (3 techniques, same param → 3 injections)
+  - Empty / malformed input returns `[]`
+  - Candidate URLs include live hosts with sentinel param
+  - Discovered URLs with `?p=v` are included
+  - Static files (css, images) excluded from candidates
+  - Candidate list capped at 15
+  - No sqlmap binary → `execute()` returns `[]`
+  - Mocked injection produces critical Finding with correct tags
+
+### Totals
+- **28 vulnerability check classes** (up from 27)
+- **117 tests passing** (up from 109)
+
 ## 3.4.0 (2026-10-03) - Depth pass: comprehensive SQLi/XSS, famous CVEs, massive recon expansion
 
 Driven by user request: "add well-known famous vulns, make existing checks

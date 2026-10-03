@@ -12,6 +12,7 @@ from .xxe import XXECheck
 from .ssti import SSTICheck
 from .path_traversal import PathTraversalCheck
 from .sql_injection import SQLInjectionCheck
+from .sqlmap_scan import SqlmapCheck
 from .cmd_injection import CommandInjectionCheck
 from .nosql_injection import NoSQLInjectionCheck
 from .jwt_weakness import JWTWeaknessCheck
@@ -41,6 +42,7 @@ ALL_CHECKS = [
     SSTICheck,
     PathTraversalCheck,
     SQLInjectionCheck,
+    SqlmapCheck,
     CommandInjectionCheck,
     NoSQLInjectionCheck,
     JWTWeaknessCheck,

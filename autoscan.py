@@ -51,7 +51,7 @@ ALL_TOOLS = [
     "nuclei", "nikto", "testssl.sh", "sslscan",
     "gobuster", "ffuf", "feroxbuster", "subjack",
     "arjun", "paramspider", "gowitness", "eyewitness",
-    "curl", "dig", "whois", "openssl",
+    "sqlmap", "curl", "dig", "whois", "openssl",
 ]
 
 

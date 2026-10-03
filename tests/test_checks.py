@@ -6,7 +6,7 @@ from scanner.checks import (
     HeadersCheck, CORSCheck, SwaggerCheck, GraphQLCheck,
     CRLFCheck, HostHeaderCheck, CloudMetadataCheck,
     SSRFCheck, XXECheck, SSTICheck, PathTraversalCheck,
-    SQLInjectionCheck, CommandInjectionCheck,
+    SQLInjectionCheck, SqlmapCheck, CommandInjectionCheck,
     NoSQLInjectionCheck, JWTWeaknessCheck,
     DeserializationCheck, CSPCookieCheck, LDAPInjectionCheck,
     XSSCheck, FamousCVEsCheck,
@@ -19,7 +19,8 @@ from scanner.utils import create_dirs
 
 class TestChecksRegistry(unittest.TestCase):
     def test_all_checks_registered(self):
-        self.assertGreaterEqual(len(ALL_CHECKS), 27)
+        self.assertGreaterEqual(len(ALL_CHECKS), 28)
+        self.assertIn(SqlmapCheck, ALL_CHECKS)
         for cls in ALL_CHECKS:
             self.assertTrue(issubclass(cls, BaseCheck),
                             f"{cls.__name__} must subclass BaseCheck")
