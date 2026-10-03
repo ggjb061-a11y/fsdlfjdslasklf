@@ -1,0 +1,59 @@
+# Pre-commit hooks for AutoVulnScan.
+#
+# Install:  pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+#
+# Hooks:
+#   - ruff            (lint)
+#   - ruff-format     (format - black-compatible)
+#   - unit tests      (fast subset)
+#   - no secrets      (basic AWS/GitHub token regex)
+#   - no large files
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^tests/.*/fixtures/.*\.(txt|json)$
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: debug-statements
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.7
+    hooks:
+      - id: ruff
+        name: ruff lint
+        args: ["--fix"]
+      - id: ruff-format
+        name: ruff format
+
+  - repo: local
+    hooks:
+      - id: unit-tests
+        name: unit tests (fast)
+        entry: python3 -m unittest discover -s tests -t .
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: no-aws-keys
+        name: no AWS keys
+        entry: '(?<!EXAMPLE)AKIA[0-9A-Z]{16}'
+        language: pygrep
+        exclude: ^(tests/|scanner/js_analyzer\.py|scanner/output/csv_report\.py|PROJECT_CHANGELOG\.md)
+        types: [text]
+
+      - id: no-github-tokens
+        name: no GitHub tokens
+        entry: '(?<!EXAMPLE)gh[pouser]_[A-Za-z0-9]{30,}'
+        language: pygrep
+        exclude: ^(tests/|scanner/js_analyzer\.py|PROJECT_CHANGELOG\.md)
+        types: [text]

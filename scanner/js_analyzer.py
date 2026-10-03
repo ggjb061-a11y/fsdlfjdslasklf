@@ -46,6 +46,39 @@ ENDPOINT_RE = re.compile(
     re.I,
 )
 
+# LinkFinder-style endpoint extraction - find any path/URL in JS strings.
+# Based on https://github.com/GerbenJavado/LinkFinder regex.
+LINKFINDER_RE = re.compile(
+    r"""
+      (?:"|')                                             # start quote
+      (
+        ((?:[a-zA-Z]{1,10}://|//)                         # scheme or protocol-relative
+         [^"'/]{1,}\.                                     # domain name
+         [a-zA-Z]{2,}[^"']{0,})                           # TLD + path
+        |
+        ((?:/|\.\./|\./)                                  # or relative path
+         [^"'><,;| *()(%%$^/\\\[\]]                        # not JS/HTML chars
+         [^"'><,;|()]{1,})                                 # not special chars
+        |
+        ([a-zA-Z0-9_\-/]{1,}/                             # path with slash
+         [a-zA-Z0-9_\-/]{1,}
+         \.(?:[a-zA-Z]{1,4}|action)                       # extension
+         (?:\?[^"|']{0,}|))
+        |
+        ([a-zA-Z0-9_\-/]{1,}/                             # endpoint-ish path
+         [a-zA-Z0-9_\-/]{3,}
+         (?:\?[^"|']{0,}|))
+        |
+        ([a-zA-Z0-9_\-]{1,}\.                             # filename.ext
+         (?:php|asp|aspx|jsp|json|yml|yaml|action|html|
+            js|txt|xml|do)
+         (?:\?[^"|']{0,}|))
+      )
+      (?:"|')
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
 
 class JSAnalyzer:
     """Download JS files and hunt for secrets and hidden endpoints."""
@@ -120,9 +153,26 @@ class JSAnalyzer:
                             evidence=val[:120],
                         ))
 
-        # Endpoint extraction
+        # Endpoint extraction (narrow regex)
         for match in ENDPOINT_RE.finditer(content):
             ep = match.group(1)
+            if ep not in self.endpoints_found:
+                self.endpoints_found.append(ep)
+
+        # LinkFinder-style broader endpoint extraction
+        for match in LINKFINDER_RE.finditer(content):
+            ep = match.group(1)
+            if not ep:
+                continue
+            # Filter out obvious false positives
+            if len(ep) < 4 or len(ep) > 200:
+                continue
+            if ep.startswith(("data:", "javascript:", "mailto:")):
+                continue
+            # Skip trivial values
+            if ep in ("application/json", "text/html", "text/plain",
+                      "image/png", "image/jpeg"):
+                continue
             if ep not in self.endpoints_found:
                 self.endpoints_found.append(ep)
 

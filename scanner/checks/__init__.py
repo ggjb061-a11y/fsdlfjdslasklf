@@ -27,6 +27,14 @@ from .s3_buckets import S3BucketCheck
 from .tech_adaptive import TechAdaptiveCheck
 from .http_smuggling import HTTPSmugglingCheck
 from .cves_check import CVEMegaCheck
+from .graphql_deep import GraphQLDeepCheck
+from .openapi_fuzzer import OpenAPIFuzzerCheck
+from .oauth_saml import OAuthSAMLCheck
+from .session_mgmt import SessionMgmtCheck
+from .prototype_pollution import PrototypePollutionCheck
+from .mass_assignment import MassAssignmentCheck
+from .form_fuzzer import FormFuzzerCheck
+from .email_header_injection import EmailHeaderInjectionCheck
 from .nuclei_scan import NucleiScan
 from .nikto_scan import NiktoScan
 from .dirbrute import DirBruteCheck
@@ -63,6 +71,14 @@ ALL_CHECKS = [
     TechAdaptiveCheck,
     HTTPSmugglingCheck,
     CVEMegaCheck,
+    GraphQLDeepCheck,
+    OpenAPIFuzzerCheck,
+    OAuthSAMLCheck,
+    SessionMgmtCheck,
+    PrototypePollutionCheck,
+    MassAssignmentCheck,
+    FormFuzzerCheck,
+    EmailHeaderInjectionCheck,
     NucleiScan,
     NiktoScan,
     DirBruteCheck,
