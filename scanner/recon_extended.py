@@ -124,27 +124,31 @@ def analyze_mail_security(domain: str) -> list[Finding]:
             cleaned = line.strip().strip('"')
             if cleaned.lower().startswith("v=spf1"):
                 spf_records.append(cleaned)
+    # SPF/DMARC/DKIM are email-authentication defenses. Realistic risk:
+    # they let attackers spoof mail, but the attacker needs to actually
+    # send email AND the victim's inbox needs to accept it. Classifying
+    # these as LOW/MEDIUM, not HIGH.
     if not spf_records:
         findings.append(Finding(
-            severity="medium",
+            severity="low",
             title="Missing SPF record",
             host=domain,
-            detail=f"No SPF (v=spf1) TXT record on {domain}. Mail from this domain is easier to spoof.",
+            detail=f"No SPF (v=spf1) TXT record on {domain}. Mail from this domain is easier to spoof but exploitation requires attacker to send mail.",
             source="mail_security",
         ))
     else:
         spf = spf_records[0]
         if "+all" in spf.lower():
             findings.append(Finding(
-                severity="high",
+                severity="medium",
                 title="SPF +all - permits spoofing from any sender",
                 host=domain,
-                detail=f"SPF record contains +all: {spf}",
+                detail=f"SPF record contains +all: {spf}. Enables anyone to send mail as this domain.",
                 source="mail_security", evidence=spf,
             ))
         elif "?all" in spf.lower():
             findings.append(Finding(
-                severity="low",
+                severity="info",
                 title="SPF ?all - neutral policy",
                 host=domain,
                 detail=f"SPF ?all leaves receivers to decide: {spf}",
@@ -162,20 +166,20 @@ def analyze_mail_security(domain: str) -> list[Finding]:
                 dmarc_records.append(cleaned)
     if not dmarc_records:
         findings.append(Finding(
-            severity="medium",
+            severity="low",
             title="Missing DMARC record",
             host=domain,
-            detail=f"No DMARC TXT record on _dmarc.{domain}",
+            detail=f"No DMARC TXT record on _dmarc.{domain}. Mail receivers cannot apply alignment policy; spoofing easier.",
             source="mail_security",
         ))
     else:
         dmarc = dmarc_records[0]
         if re.search(r"p=none", dmarc, re.IGNORECASE):
             findings.append(Finding(
-                severity="medium",
+                severity="low",
                 title="DMARC policy is p=none",
                 host=domain,
-                detail=f"DMARC enforces monitor-only (p=none): {dmarc}",
+                detail=f"DMARC enforces monitor-only (p=none): {dmarc}. Fail reports collected but no enforcement.",
                 source="mail_security", evidence=dmarc,
             ))
 

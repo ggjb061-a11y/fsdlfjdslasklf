@@ -185,12 +185,39 @@ elif [ "$PM" = "brew" ]; then
 fi
 
 # ── Python dependencies (always try) ────────────────────────────
-info "Installing Python dependencies..."
-pip_install "requests"
-pip_install "Jinja2"
-pip_install "click"
-pip_install "defusedxml"
-pip_install "wafw00f"
+info "Installing Python dependencies (critical: requests, Jinja2, defusedxml)..."
+# Hardest-tried install order: pip3 -> pip3 --break-system-packages ->
+# apt python3-* package. defusedxml is CRITICAL - without it the scanner
+# refuses to parse hostile sitemaps.
+pip_or_apt() {
+    local pypi="$1"
+    local apt_pkg="$2"
+    if retry pip3 install -q --upgrade "$pypi" 2>/dev/null; then
+        ok "$pypi via pip"
+        mark_installed "pip:$pypi"
+        return 0
+    fi
+    if retry pip3 install -q --upgrade --break-system-packages "$pypi" 2>/dev/null; then
+        ok "$pypi via pip (--break-system-packages)"
+        mark_installed "pip:$pypi"
+        return 0
+    fi
+    if [ -n "$apt_pkg" ] && [ "$PM" = "apt" ]; then
+        if retry apt-get install -y -qq "$apt_pkg" 2>/dev/null; then
+            ok "$pypi via apt ($apt_pkg)"
+            mark_installed "pip:$pypi"
+            return 0
+        fi
+    fi
+    mark_failed "pip:$pypi"
+    warn "$pypi could not be installed - some features will degrade"
+    return 1
+}
+pip_or_apt "requests"   "python3-requests"
+pip_or_apt "Jinja2"     "python3-jinja2"
+pip_or_apt "click"      "python3-click"
+pip_or_apt "defusedxml" "python3-defusedxml"
+pip_or_apt "wafw00f"    "wafw00f"
 
 # Optional Python-based tools
 pip_install "arjun" || warn "arjun optional"

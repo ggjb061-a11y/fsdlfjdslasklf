@@ -80,9 +80,12 @@ class TestCheckStaticData(unittest.TestCase):
 
     def test_ssti_payloads(self):
         self.assertGreater(len(SSTICheck.PRIMARY), 3)
-        for payload, expected, engines in SSTICheck.PRIMARY:
+        for payload, expected, diff_payload, diff_expected, engines in SSTICheck.PRIMARY:
             self.assertTrue(payload)
             self.assertTrue(expected)
+            self.assertTrue(diff_payload)
+            self.assertTrue(diff_expected)
+            self.assertNotEqual(expected, diff_expected)  # must differ for the differential probe
             self.assertTrue(engines)
 
     def test_path_traversal(self):

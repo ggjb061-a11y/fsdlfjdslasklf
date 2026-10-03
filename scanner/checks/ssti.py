@@ -1,41 +1,50 @@
 """
-Server-Side Template Injection detection with baseline comparison.
+Server-Side Template Injection detection with STRONG baseline comparison.
 
-A finding fires only when:
-  1. The template-math expression evaluates to its distinct result
-     (e.g. {{7*7}} -> 49).
-  2. The raw payload is NOT present verbatim in the response (otherwise
-     the server might just be echoing).
-  3. The expected result is absent from the benign baseline (prevents FP
-     when the number happens to be on the page).
-  4. Confirmed on a second shot.
+Five independent guards prevent false positives from reflections and
+coincidental number occurrences:
 
-Engine confirmation uses a secondary distinctive expression (7*'7' = '7777777'
-for Jinja/Twig; '${7*7}' for Freemarker) to narrow down the engine.
+  1. Baseline guard: expected result must NOT already appear in baseline.
+  2. Primary probe: expected result MUST appear in probe response.
+  3. Echo guard: raw payload must NOT appear in response (would mean
+     the server is just echoing input, not evaluating).
+  4. Differential probe: a SECOND payload with a different expected
+     value (e.g. {{2*5}} -> 10) must evaluate to its own result.
+     If both the primary and the differential expected values appear
+     only in their respective responses (and NOT swapped), evaluation
+     is confirmed. If they appear in each other's responses, it's
+     just coincidence/reflection.
+  5. Double-confirmation: both probes repeated.
+
+This fixes the FP where "@(7*7)" was reported on sites where "49"
+appears naturally in page content.
 """
-import urllib.parse
 import time
+import urllib.parse
+
 from .base import BaseCheck
 from ..models import Finding
-from ..utils import run
 
 
 class SSTICheck(BaseCheck):
-    """Baseline-compared, context-aware SSTI detection."""
+    """Differential + baseline-compared SSTI detection (no reflection FPs)."""
 
     name = "SSTI"
-    description = "Baseline-compared Server-Side Template Injection"
+    description = "Differential SSTI detection with 5 false-positive guards"
 
-    # Primary probes: payload, expected evaluation, candidate engines
+    # (payload, expected, differential_payload, differential_expected, engines)
+    # The differential uses the same engine syntax with different numbers so
+    # that an evaluating engine returns a distinct result; a reflecting server
+    # returns the same shape of response to both.
     PRIMARY = [
-        ("{{7*7}}",       "49",      ["Jinja2", "Twig", "Nunjucks"]),
-        ("${7*7}",        "49",      ["Freemarker", "Velocity"]),
-        ("{7*7}",         "49",      ["Smarty", "Mustache"]),
-        ("<%=7*7%>",      "49",      ["ERB/Ruby", "ASP.NET"]),
-        ("#{7*7}",        "49",      ["Pug", "Ruby"]),
-        ("{{7*'7'}}",     "7777777", ["Jinja2"]),
-        ("${{7*7}}",      "49",      ["Spring EL"]),
-        ("@(7*7)",        "49",      ["Razor"]),
+        ("{{7*7}}",       "49",       "{{2*5}}",       "10",       ["Jinja2", "Twig", "Nunjucks"]),
+        ("${7*7}",        "49",       "${2*5}",        "10",       ["Freemarker", "Velocity"]),
+        ("{7*7}",         "49",       "{2*5}",         "10",       ["Smarty", "Mustache"]),
+        ("<%=7*7%>",      "49",       "<%=2*5%>",      "10",       ["ERB/Ruby", "ASP.NET"]),
+        ("#{7*7}",        "49",       "#{2*5}",        "10",       ["Pug", "Ruby"]),
+        ("{{7*'7'}}",     "7777777",  "{{3*'3'}}",     "333",      ["Jinja2"]),
+        ("${{7*7}}",      "49",       "${{2*5}}",      "10",       ["Spring EL"]),
+        ("@(7*7)",        "49",       "@(2*5)",        "10",       ["Razor"]),
     ]
 
     PARAMS = [
@@ -45,59 +54,80 @@ class SSTICheck(BaseCheck):
         "title", "description", "greeting", "template",
     ]
 
-    def _fetch(self, url: str) -> str:
-        rc, body, _ = run(["curl", "-sL", "--max-time", "6", url], timeout=10)
-        return body if rc == 0 and body else ""
-
-    def _url(self, base: str, param: str, value: str) -> str:
-        return f"{base}?{param}={urllib.parse.quote(value, safe='')}"
-
     def _check_param(self, base: str, param: str) -> bool:
-        # Baseline must NOT contain the expected results
+        # Fresh (uncached) baseline specifically for this param
         baseline = self._fetch(self._url(base, param, "AutoVulnScanBaseline"))
         if not baseline:
             return False
 
-        for payload, expected, engines in self.PRIMARY:
-            # Baseline check: skip if the expected number is a common feature
-            # of the page (would make everything an FP)
-            if baseline.count(expected) > 2:
+        for payload, expected, diff_payload, diff_expected, engines in self.PRIMARY:
+            # Guard 1: expected or differential-expected already common in baseline
+            if baseline.count(expected) > 2 or baseline.count(diff_expected) > 2:
                 continue
+            if expected in baseline or diff_expected in baseline:
+                continue
+
+            # Guard 2: primary probe
             url = self._url(base, param, payload)
             body = self._fetch(url)
             if not body or len(body) < 10:
                 continue
-            # Require: expected PRESENT, raw payload ABSENT (not just echoed)
+
+            # Guard 3: raw payload must NOT be echoed verbatim
+            if payload in body:
+                continue
+            # Guard 2 cont: expected must appear
             if expected not in body:
                 continue
-            if payload in body:
-                # Server just echoed the payload literally - not evaluated
+
+            # Guard 4: differential probe (different math -> different result)
+            diff_url = self._url(base, param, diff_payload)
+            diff_body = self._fetch(diff_url)
+            if not diff_body:
                 continue
-            # Also require: expected not in baseline response for same param
-            if expected in baseline:
+            # The differential expected (10) must appear in diff response
+            if diff_expected not in diff_body:
                 continue
-            # Double-confirm
+            # And must NOT appear in primary response (would prove coincidence)
+            if diff_expected in body:
+                continue
+            # And primary expected (49) must NOT appear in differential response
+            if expected in diff_body:
+                continue
+            # And raw differential payload must NOT be echoed
+            if diff_payload in diff_body:
+                continue
+
+            # Guard 5: double-confirm both
             time.sleep(0.3)
             body2 = self._fetch(url)
-            if expected not in body2 or payload in body2:
+            diff_body2 = self._fetch(diff_url)
+            if (not body2 or not diff_body2
+                or expected not in body2
+                or diff_expected not in diff_body2
+                or payload in body2
+                or diff_payload in diff_body2):
                 continue
+
             engine = engines[0] if len(engines) == 1 else " / ".join(engines)
             self.findings.append(Finding(
                 severity="critical",
                 title=f"SSTI ({engine}) via '{param}'",
                 host=base,
                 detail=(
-                    f"Parameter '{param}' evaluates template expression {payload!r} -> {expected!r}.\n"
-                    f"- Expected value present in both probes\n"
-                    f"- Raw payload absent (not just echoed)\n"
-                    f"- Expected value absent from benign baseline\n"
+                    f"Parameter '{param}' evaluates template expressions.\n"
+                    f"  * {payload!r} -> {expected!r} (double-confirmed)\n"
+                    f"  * {diff_payload!r} -> {diff_expected!r} (differential probe)\n"
+                    f"  * Raw payloads absent from both responses\n"
+                    f"  * Expected results NOT present in benign baseline\n"
+                    f"  * Expected results NOT swapped between probes\n"
                     f"Confirmed engine family: {engine}"
                 ),
                 source="ssti",
                 url=url,
                 tags=["ssti", "rce-potential", engine.lower().replace(" ", "-"),
                       f"param:{param}"],
-                evidence=f"payload={payload} -> {expected}",
+                evidence=f"{payload}->{expected}; {diff_payload}->{diff_expected}",
             ))
             return True
         return False

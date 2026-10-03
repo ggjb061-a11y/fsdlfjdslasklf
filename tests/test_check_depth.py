@@ -85,14 +85,16 @@ class TestSSTIDepth(unittest.TestCase):
 
     def test_payload_echoed_no_finding(self):
         """FP guard: if the server echoes the raw payload (not evaluated),
-        we must NOT fire."""
+        we must NOT fire. The echo guard sees '{{7*7}}' in the response."""
         baseline = "<html>normal</html>"
         echoed = "<html>You searched for: {{7*7}} - no results</html>"
         responses = [
             (0, baseline, ""),
             (0, echoed, ""),
         ] * 50
-        with patch("scanner.checks.ssti.run",
+        # scanner.checks.base imported `run` into its namespace via
+        # `from ..utils import run` - patch the LOCAL reference.
+        with patch("scanner.checks.base.run",
                    side_effect=make_run(responses)):
             c = self._check()
             c.execute()
@@ -101,39 +103,42 @@ class TestSSTIDepth(unittest.TestCase):
     def test_expected_in_baseline_no_finding(self):
         """FP guard: if '49' already appears in baseline, we must skip."""
         baseline = "<html>Items 1-49 on this page</html>"
-        responses = [(0, baseline, "")] * 100
-        with patch("scanner.checks.ssti.run",
+        responses = [(0, baseline, "")] * 500
+        with patch("scanner.checks.base.run",
                    side_effect=make_run(responses)):
             c = self._check()
             c.execute()
             self.assertEqual(c.findings, [])
 
     def test_single_shot_match_requires_double_confirm(self):
-        """If the first probe matches but the double-confirm doesn't,
-        we must NOT fire."""
+        """New differential logic: if 49 appears in BOTH probes (primary
+        and differential), the FP guard catches it even without a
+        double-confirm failure."""
         baseline = "<html>normal</html>"
-        hit = "<html>Result: 49</html>"
-        miss = "<html>normal</html>"
-        responses = [
-            (0, baseline, ""),
-            (0, hit, ""),
-            (0, miss, ""),  # second probe fails
-        ] * 10
-        with patch("scanner.checks.ssti.run",
+        hit = "<html>Result: 49</html>"  # same body for every probe
+        responses = [(0, baseline, "")] + [(0, hit, "")] * 100
+        with patch("scanner.checks.base.run",
                    side_effect=make_run(responses)):
             c = self._check()
             c.execute()
+            # 49 appears in BOTH {{7*7}} and {{2*5}} responses -> FP guard trips
             self.assertEqual(c.findings, [])
 
     def test_evaluated_double_confirmed_fires(self):
+        """Positive case: {{7*7}} -> 49, {{2*5}} -> 10 with correct values
+        in each response, no cross-contamination, double-confirmed."""
         baseline = "<html>normal page</html>"
-        hit = "<html>Result: 49</html>"
+        hit_49 = "<html>Result: 49 total items</html>"
+        hit_10 = "<html>Result: xx total items</html>"  # avoid '10' substring in '49'-free body
+        hit_10 = "<html>Report xx: 10 found</html>"
         responses = [
-            (0, baseline, ""),
-            (0, hit, ""),
-            (0, hit, ""),  # double-confirm matches
-        ]
-        with patch("scanner.checks.ssti.run",
+            (0, baseline, ""),      # baseline
+            (0, hit_49, ""),        # primary probe ({{7*7}} -> 49)
+            (0, hit_10, ""),        # differential probe ({{2*5}} -> 10)
+            (0, hit_49, ""),        # double-confirm primary
+            (0, hit_10, ""),        # double-confirm differential
+        ] + [(0, baseline, "")] * 50
+        with patch("scanner.checks.base.run",
                    side_effect=make_run(responses)):
             c = self._check()
             c.execute()

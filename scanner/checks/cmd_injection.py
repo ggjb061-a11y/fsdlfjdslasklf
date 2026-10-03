@@ -79,6 +79,18 @@ class CommandInjectionCheck(BaseCheck):
             # Highly unusual - abandon this param to avoid FP
             return False
 
+        # Reflection probe: send JUST the marker as the parameter value
+        # (no shell separators). If the server echoes URL parameters into
+        # the response, the marker will appear here too - meaning the
+        # marker appearing in the payload response is just reflection,
+        # not execution. This kills the biggest FP class.
+        rc_r, reflect_body, _ = self._fetch(
+            self._url(base, param, self.MARKER), timeout=4,
+        )
+        if rc_r == 0 and self.MARKER in reflect_body:
+            # Param reflects raw input - cannot distinguish exec from echo
+            return False
+
         # Technique 1: reflected marker
         for payload in self.MARKER_PAYLOADS:
             url = self._url(base, param, payload)
@@ -99,7 +111,8 @@ class CommandInjectionCheck(BaseCheck):
                 detail=(
                     f"Parameter '{param}' executes shell command. Marker '{self.MARKER}' "
                     f"appeared in both injection attempts but is absent from the benign "
-                    f"baseline, confirming server-side execution rather than echo."
+                    f"baseline AND from a reflection-only probe (plain marker without "
+                    f"shell separators) - confirming server-side execution rather than echo."
                 ),
                 source="cmd_injection",
                 url=url,

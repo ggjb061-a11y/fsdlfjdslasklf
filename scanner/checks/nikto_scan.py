@@ -1,4 +1,10 @@
-"""Nikto web server scanner integration."""
+"""Nikto web server scanner integration.
+
+Handles multiple nikto JSON output shapes:
+  * Modern (2.5+):  [ {host, ip, port, vulnerabilities: [...]}, ... ]
+  * Older:         { vulnerabilities: [...] }
+  * Flat list:     [ {id, msg, url}, ... ]
+"""
 import json
 from pathlib import Path
 from .base import BaseCheck
@@ -9,6 +15,88 @@ from ..utils import which, run
 class NiktoScan(BaseCheck):
     name = "Nikto"
     description = "Run Nikto web server vulnerability scanning"
+
+    def _normalize_vulns(self, data) -> list[dict]:
+        """Return a flat list of vulnerability dicts regardless of input shape."""
+        out: list[dict] = []
+        # Case 1: list of per-host objects (modern nikto)
+        if isinstance(data, list):
+            for entry in data:
+                if isinstance(entry, dict):
+                    host_ctx = {k: entry.get(k) for k in ("host", "ip", "port")}
+                    vulns = entry.get("vulnerabilities", [])
+                    if isinstance(vulns, list):
+                        for v in vulns:
+                            if isinstance(v, dict):
+                                merged = {**host_ctx, **v}
+                                out.append(merged)
+                    elif entry.get("id") or entry.get("msg"):
+                        # Flat vulnerability entry
+                        out.append(entry)
+        # Case 2: dict with vulnerabilities inside
+        elif isinstance(data, dict):
+            host_ctx = {k: data.get(k) for k in ("host", "ip", "port")}
+            vulns = data.get("vulnerabilities", [])
+            if isinstance(vulns, list):
+                for v in vulns:
+                    if isinstance(v, dict):
+                        merged = {**host_ctx, **v}
+                        out.append(merged)
+        return out
+
+    @staticmethod
+    def _vuln_title(v: dict) -> str:
+        """Build a readable finding title from a nikto vulnerability dict."""
+        # Preferred: use `id` if present and non-empty
+        for key in ("id", "nikto_id", "osvdb_id", "osvdbid", "msg"):
+            val = v.get(key)
+            if val and str(val).strip() not in ("", "?", "None"):
+                s = str(val).strip()
+                # Truncate the message if it's being used as the title
+                return s if len(s) < 80 else s[:77] + "..."
+        return "Nikto finding"
+
+    @staticmethod
+    def _vuln_detail(v: dict) -> str:
+        """Build a readable detail from a nikto vulnerability dict."""
+        parts = []
+        if v.get("msg"):
+            parts.append(str(v["msg"])[:300])
+        elif v.get("description"):
+            parts.append(str(v["description"])[:300])
+        if v.get("url"):
+            parts.append(f"URL: {v['url']}")
+        if v.get("method"):
+            parts.append(f"Method: {v['method']}")
+        if v.get("references"):
+            refs = v["references"] if isinstance(v["references"], str) \
+                else " ".join(str(r) for r in (v["references"] or []))
+            parts.append(f"Refs: {refs[:120]}")
+        if not parts:
+            # Last-resort fallback with filtered keys (no metadata flood)
+            filtered = {k: val for k, val in v.items()
+                         if k in ("id", "osvdbid", "msg", "description",
+                                   "url", "method", "nikto_id")
+                         and val is not None}
+            parts.append(json.dumps(filtered)[:300])
+        return "\n".join(parts)
+
+    @staticmethod
+    def _vuln_severity(v: dict) -> str:
+        """Pick severity from fields nikto exposes; default medium."""
+        for key in ("severity", "risk", "level"):
+            raw = v.get(key)
+            if not raw:
+                continue
+            low = str(raw).strip().lower()
+            if low in ("critical", "high", "medium", "low", "info"):
+                return low
+        msg = (v.get("msg") or v.get("description") or "").lower()
+        if any(k in msg for k in ("rce", "shell", "command execution", "sql injection")):
+            return "high"
+        if any(k in msg for k in ("directory", "listing", "sensitive")):
+            return "medium"
+        return "medium"
 
     def execute(self) -> list[Finding]:
         if not which("nikto"):
@@ -27,17 +115,21 @@ class NiktoScan(BaseCheck):
         for p in Path(self.dirs["nikto"]).glob("*.json"):
             try:
                 data = json.loads(p.read_text(errors="replace"))
-                vulns = data if isinstance(data, list) else data.get("vulnerabilities", [])
-                for v in (vulns or []):
-                    self.findings.append(Finding(
-                        severity="medium",
-                        title=f"Nikto: {v.get('id', '?')}",
-                        host=v.get("host", self.target),
-                        detail=v.get("msg", v.get("description", str(v))),
-                        source="nikto",
-                        url=v.get("url", ""),
-                    ))
-            except Exception:
-                pass
+            except Exception as exc:
+                self.log.debug(f"  nikto JSON parse ({p.name}): {exc}")
+                continue
+            vulns = self._normalize_vulns(data)
+            for v in vulns:
+                host = v.get("host") or self.target
+                port = v.get("port")
+                self.findings.append(Finding(
+                    severity=self._vuln_severity(v),
+                    title=f"Nikto: {self._vuln_title(v)}",
+                    host=f"{host}:{port}" if port else host,
+                    detail=self._vuln_detail(v),
+                    source="nikto",
+                    url=v.get("url", ""),
+                    tags=["nikto", f"nikto-id:{v.get('id', 'unknown')}"],
+                ))
 
         return self.findings

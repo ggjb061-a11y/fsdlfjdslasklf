@@ -82,9 +82,13 @@ class SSLCheck(BaseCheck):
                 source="sslscan",
             ))
         if "TLSv1.0" in content and "enabled" in content.lower():
+            # TLSv1.0 is deprecated and PCI-DSS flags it, but BEAST/POODLE
+            # are heavily mitigated client-side; realistic risk is LOW on
+            # modern browsers unless the server also serves old clients.
             self.findings.append(Finding(
-                severity="medium", title="SSL/TLS: TLSv1.0 Enabled",
-                host=self.target, detail="Deprecated TLSv1.0 is enabled",
+                severity="low", title="SSL/TLS: TLSv1.0 Enabled (deprecated)",
+                host=self.target,
+                detail="TLSv1.0 is enabled. Deprecated by PCI-DSS and all major browsers; attack surface limited to legacy clients.",
                 source="sslscan",
             ))
 
@@ -98,9 +102,13 @@ class SSLCheck(BaseCheck):
                 source="openssl",
             ))
         if "self signed" in text.lower() or "self-signed" in text.lower():
+            # Self-signed cert is a trust-chain issue, not an exploitation
+            # path; browsers block or warn, so it's a LOW severity misconfig
+            # unless combined with mTLS/API clients that ignore validation.
             self.findings.append(Finding(
-                severity="medium", title="SSL/TLS: Self-Signed Certificate",
-                host=self.target, detail="Server presents self-signed certificate",
+                severity="low", title="SSL/TLS: Self-Signed Certificate",
+                host=self.target,
+                detail="Server presents self-signed certificate; clients that ignore trust chain are vulnerable to MITM.",
                 source="openssl",
             ))
         if re.search(r"Protocol\s*:\s*SSLv[23]", text):

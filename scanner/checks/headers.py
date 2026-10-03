@@ -9,13 +9,21 @@ class HeadersCheck(BaseCheck):
     name = "Security Headers"
     description = "Check for missing security headers and server info disclosure"
 
+    # Severity calibrated to realistic risk, not CVSS inflation:
+    #  * HSTS missing is MEDIUM, not HIGH - it's a defensive control; actual
+    #    exploitation needs an active MITM on first visit.
+    #  * CSP / X-Frame-Options missing are LOW - defense-in-depth, don't
+    #    themselves enable XSS or clickjacking; a real XSS vuln would be
+    #    reported separately by XSSCheck as HIGH/CRITICAL.
+    #  * MIME-type sniffing missing stays LOW.
+    #  * Referrer-Policy / Permissions-Policy are INFO.
     REQUIRED = {
-        "strict-transport-security": ("high",   "HSTS not set - downgrade attack possible"),
-        "content-security-policy":   ("medium", "CSP missing - XSS risk increased"),
-        "x-frame-options":           ("medium", "Clickjacking protection missing"),
-        "x-content-type-options":    ("low",    "MIME sniffing protection missing"),
-        "referrer-policy":           ("info",   "Referrer-Policy not set"),
-        "permissions-policy":        ("info",   "Permissions-Policy not set"),
+        "strict-transport-security": ("medium", "HSTS not set - defensive control missing; a first-visit MITM could downgrade."),
+        "content-security-policy":   ("low",    "CSP header missing - defense-in-depth against XSS absent."),
+        "x-frame-options":           ("low",    "X-Frame-Options missing - clickjacking defense missing."),
+        "x-content-type-options":    ("low",    "X-Content-Type-Options missing - MIME sniffing possible."),
+        "referrer-policy":           ("info",   "Referrer-Policy not set."),
+        "permissions-policy":        ("info",   "Permissions-Policy not set."),
     }
 
     def execute(self) -> list[Finding]:
@@ -54,8 +62,10 @@ class HeadersCheck(BaseCheck):
                 if line.lower().startswith("server:"):
                     val = line.split(":", 1)[1].strip()
                     if re.search(r"\d+\.\d+", val):
+                        # Info-only: version disclosure doesn't itself exploit
+                        # anything; it only hints at the target stack.
                         self.findings.append(Finding(
-                            severity="low",
+                            severity="info",
                             title="Server Version Disclosure",
                             host=host,
                             detail=f"Server header reveals version: {val}",
