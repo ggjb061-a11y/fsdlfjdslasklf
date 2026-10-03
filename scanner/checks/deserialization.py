@@ -26,11 +26,23 @@ class DeserializationCheck(BaseCheck):
         for name, rx in self.SIGNATURES:
             m = rx.search(text)
             if m:
+                # A serialized blob in a cookie/form proves the server
+                # emits a serialized object, not that it deserializes
+                # attacker-controlled input. It's a strong hint worth
+                # investigation; severity stays MEDIUM until an exploit
+                # path is confirmed by a dedicated check or manual follow-up.
                 self.findings.append(Finding(
-                    severity="high",
+                    severity="medium",
                     title=f"Serialized Blob Detected ({name})",
                     host=host,
-                    detail=f"Possible deserialization sink via {source}; signature matched: {name}",
+                    detail=(
+                        f"Potential deserialization sink via {source}; "
+                        f"signature matched: {name}. "
+                        f"The server round-trips a {name} blob through user-"
+                        f"accessible storage. Verify whether modifying it "
+                        f"triggers server-side deserialization (gadget chain) "
+                        f"before escalating."
+                    ),
                     source="deserialization",
                     url=host,
                     evidence=m.group(0)[:120],
