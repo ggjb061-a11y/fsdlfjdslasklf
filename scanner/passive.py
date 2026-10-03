@@ -189,14 +189,24 @@ class PassiveModule:
             # Probe known paths
             for cms, paths in CMS_SIGNATURES.items():
                 for path, label in paths:
-                    rc, _, _ = run(
+                    rc, headers, _ = run(
                         ["curl", "-sI", "--max-time", "5", f"{base}{path}"],
                         timeout=8,
                     )
-                    # Parse status
-                    if rc == 0:
-                        # Check if we got 200
-                        pass  # httpx or header check handled elsewhere
+                    if rc != 0 or not headers:
+                        continue
+                    first_line = headers.splitlines()[0] if headers.splitlines() else ""
+                    if "200" in first_line or "301" in first_line or "302" in first_line:
+                        if base not in self.cms_info:
+                            self.cms_info[base] = cms
+                        self.findings.append(Finding(
+                            severity="info",
+                            title=f"CMS Path Found: {path} ({cms})",
+                            host=base,
+                            detail=f"{label} path accessible at {base}{path}",
+                            source="cms_detect",
+                            url=f"{base}{path}",
+                        ))
 
         # WordPress specific: check wp-json
         for base in hosts:

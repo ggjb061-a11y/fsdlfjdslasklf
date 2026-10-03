@@ -1,8 +1,10 @@
 """Reconnaissance: subdomains, DNS, WHOIS, port scanning, live host probing."""
+import hashlib
 import logging
+import struct
 from pathlib import Path
 from .utils import which, run, read_lines, write_lines, resolve_ip, resolve_all_ips
-from .models import HostRecord
+from .models import HostRecord, Finding
 
 logger = logging.getLogger("autoscan.recon")
 
@@ -25,6 +27,8 @@ class ReconModule:
         self.whois: str = ""
         self.waf: str = ""
         self.ports_raw: list[str] = []
+        self.google_dorks: list[str] = []
+        self.findings: list = []
 
     # ─── WHOIS ────────────────────────────────────────────────────────────────
 
@@ -149,6 +153,180 @@ class ReconModule:
             domains = [d.strip() for d in stdout.splitlines() if d.strip() and "API" not in d]
             write_lines(out, domains)
             logger.info(f"  Reverse IP ({ip}): {len(domains)} domains")
+
+    def _dns_zone_transfer(self) -> None:
+        """Attempt AXFR zone transfer against all NS servers."""
+        if not which("dig"):
+            return
+        _, ns_out, _ = run(["dig", "+short", "NS", self.target], timeout=15)
+        nameservers = [ns.strip().rstrip(".") for ns in ns_out.splitlines() if ns.strip()]
+        if not nameservers:
+            return
+
+        out_file = f"{self.dirs['dns']}/zone_transfer.txt"
+        for ns in nameservers:
+            rc, out, _ = run(
+                ["dig", "AXFR", self.target, f"@{ns}"],
+                timeout=30,
+            )
+            if rc == 0 and out and "Transfer failed" not in out and "XFR size:" in out:
+                Path(out_file).write_text(out)
+                for line in out.splitlines():
+                    parts = line.split()
+                    if parts and parts[0].endswith(f".{self.target}."):
+                        sub = parts[0].rstrip(".")
+                        if sub not in self.subdomains:
+                            self.subdomains.append(sub)
+                self.findings.append(Finding(
+                    severity="critical",
+                    title="DNS Zone Transfer Allowed (AXFR)",
+                    host=self.target,
+                    detail=f"Nameserver {ns} allows full zone transfer – all DNS records exposed",
+                    source="dns_axfr",
+                ))
+                logger.info(f"  AXFR: Zone transfer succeeded on {ns}!")
+                break
+            else:
+                logger.debug(f"  AXFR: Transfer denied on {ns}")
+
+    def _vhost_discovery(self) -> None:
+        """Discover virtual hosts via Host header manipulation."""
+        ip = resolve_ip(self.target)
+        if not ip:
+            return
+        vhost_prefixes = [
+            "dev", "staging", "stage", "test", "admin", "api", "app",
+            "beta", "internal", "intranet", "portal", "demo", "old",
+            "new", "v2", "cdn", "mail", "webmail", "m", "mobile",
+        ]
+        out_file = f"{self.dirs['recon']}/vhosts.txt"
+        found = []
+
+        rc, baseline, _ = run(
+            ["curl", "-sk", "--max-time", "8",
+             "-H", f"Host: nonexistent-{self.target}",
+             f"https://{ip}"],
+            timeout=12,
+        )
+        baseline_len = len(baseline) if baseline else 0
+
+        for prefix in vhost_prefixes:
+            vhost = f"{prefix}.{self.target}"
+            rc, body, _ = run(
+                ["curl", "-sk", "--max-time", "5",
+                 "-H", f"Host: {vhost}",
+                 f"https://{ip}"],
+                timeout=8,
+            )
+            if rc != 0 or not body:
+                continue
+            if abs(len(body) - baseline_len) > 100 and len(body) > 200:
+                found.append(vhost)
+
+        if found:
+            write_lines(out_file, found)
+            self.subdomains.extend(found)
+            logger.info(f"  Vhosts found: {len(found)}")
+
+    def _favicon_hash(self) -> None:
+        """Download favicon and compute mmh3 hash for service fingerprinting."""
+        hosts = self.live_hosts[:5] or [f"https://{self.target}"]
+        out_file = f"{self.dirs['recon']}/favicon_hashes.txt"
+        results = []
+
+        for base in hosts:
+            for path in ["/favicon.ico", "/assets/favicon.ico"]:
+                rc, body, _ = run(
+                    ["curl", "-sL", "--max-time", "10", "--output", "-", f"{base}{path}"],
+                    timeout=15,
+                )
+                if rc != 0 or not body or len(body) < 100:
+                    continue
+                try:
+                    import base64
+                    b64 = base64.encodebytes(body.encode("latin-1"))
+                    h = self._mmh3_hash(b64)
+                    results.append(f"{base}: {h}")
+                    for hr in self.host_records:
+                        if base.endswith(hr.domain) or hr.domain in base:
+                            hr.technologies.append(f"favicon:{h}")
+                    break
+                except Exception:
+                    pass
+
+        if results:
+            write_lines(out_file, results)
+            logger.info(f"  Favicon hashes: {len(results)}")
+
+    @staticmethod
+    def _mmh3_hash(data: bytes) -> int:
+        """Simple MurmurHash3 32-bit implementation for favicon hashing."""
+        if isinstance(data, str):
+            data = data.encode()
+        length = len(data)
+        c1, c2, seed = 0xcc9e2d51, 0x1b873593, 0
+        h = seed
+        rounded_end = (length & 0xfffffffc)
+        for i in range(0, rounded_end, 4):
+            k = (data[i] | (data[i+1] << 8) | (data[i+2] << 16) | (data[i+3] << 24))
+            k = (k * c1) & 0xffffffff
+            k = ((k << 15) | (k >> 17)) & 0xffffffff
+            k = (k * c2) & 0xffffffff
+            h ^= k
+            h = ((h << 13) | (h >> 19)) & 0xffffffff
+            h = (h * 5 + 0xe6546b64) & 0xffffffff
+        k = 0
+        val = length & 0x03
+        if val == 3:
+            k = (data[rounded_end + 2] << 16)
+        if val >= 2:
+            k |= (data[rounded_end + 1] << 8)
+        if val >= 1:
+            k |= data[rounded_end]
+            k = (k * c1) & 0xffffffff
+            k = ((k << 15) | (k >> 17)) & 0xffffffff
+            k = (k * c2) & 0xffffffff
+            h ^= k
+        h ^= length
+        h ^= (h >> 16)
+        h = (h * 0x85ebca6b) & 0xffffffff
+        h ^= (h >> 13)
+        h = (h * 0xc2b2ae35) & 0xffffffff
+        h ^= (h >> 16)
+        if h > 0x7fffffff:
+            h -= 0x100000000
+        return h
+
+    def _google_dorks(self) -> None:
+        """Generate Google dork queries for manual reconnaissance."""
+        d = self.target
+        dorks = [
+            f'site:{d} filetype:pdf',
+            f'site:{d} filetype:doc OR filetype:docx OR filetype:xls',
+            f'site:{d} filetype:sql OR filetype:db OR filetype:bak',
+            f'site:{d} filetype:log',
+            f'site:{d} filetype:env',
+            f'site:{d} filetype:xml',
+            f'site:{d} filetype:conf OR filetype:cfg OR filetype:ini',
+            f'site:{d} inurl:admin OR inurl:login OR inurl:dashboard',
+            f'site:{d} inurl:api OR inurl:graphql OR inurl:swagger',
+            f'site:{d} intitle:"index of"',
+            f'site:{d} intext:"sql syntax" OR intext:"mysql_fetch"',
+            f'site:{d} intext:"error" OR intext:"warning" OR intext:"fatal"',
+            f'site:{d} ext:php intitle:phpinfo',
+            f'site:{d} inurl:wp-content OR inurl:wp-includes',
+            f'site:{d} inurl:".git" OR inurl:".env"',
+            f'site:{d} "password" OR "passwd" OR "credentials"',
+            f'site:{d} inurl:redirect OR inurl:return OR inurl:next',
+            f'site:{d} inurl:upload OR inurl:file OR inurl:download',
+            f'"{d}" site:pastebin.com OR site:ghostbin.com',
+            f'"{d}" site:github.com OR site:gitlab.com',
+            f'"{d}" intext:"api_key" OR intext:"apikey" OR intext:"secret"',
+        ]
+        self.google_dorks = dorks
+        out_file = f"{self.dirs['recon']}/google_dorks.txt"
+        write_lines(out_file, dorks)
+        logger.info(f"  Google dorks: {len(dorks)} queries generated")
 
     def _deduplicate_subdomains(self) -> None:
         unique = sorted({
@@ -309,6 +487,7 @@ class ReconModule:
         steps = [
             ("WHOIS",                  self._whois),
             ("DNS Records",            self._dns),
+            ("DNS Zone Transfer",      self._dns_zone_transfer),
             ("Subfinder",              self._subfinder),
             ("Amass (passive)",        self._amass),
             ("Assetfinder",            self._assetfinder),
@@ -318,6 +497,9 @@ class ReconModule:
             ("Reverse IP lookup",      self._reverse_ip),
             ("Subdomain dedup",        self._deduplicate_subdomains),
             ("HTTP probe (httpx)",     self._httpx_probe),
+            ("Virtual host discovery", self._vhost_discovery),
+            ("Favicon hash",          self._favicon_hash),
+            ("Google dorks",           self._google_dorks),
             ("Port scan (nmap)",       self._nmap),
             ("Port scan (masscan)",    self._masscan),
             ("Tech detect (whatweb)",  self._whatweb),

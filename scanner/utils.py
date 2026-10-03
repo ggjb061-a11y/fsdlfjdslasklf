@@ -25,6 +25,15 @@ def tools_status(names: list) -> dict:
 
 # ─── Subprocess runner ────────────────────────────────────────────────────────
 
+_PROXY: Optional[str] = None
+
+def set_proxy(proxy: Optional[str]) -> None:
+    global _PROXY
+    _PROXY = proxy
+
+def get_proxy() -> Optional[str]:
+    return _PROXY
+
 def run(
     cmd: List[str],
     output_file: Optional[str] = None,
@@ -38,7 +47,14 @@ def run(
     Writes stdout to output_file if provided.
     Never raises on tool-not-found or timeout – returns negative rc.
     """
+    if _PROXY and cmd and cmd[0] == "curl":
+        cmd = [cmd[0], "--proxy", _PROXY] + cmd[1:]
     try:
+        env = None
+        if _PROXY and cmd and cmd[0] not in ("curl",):
+            import os
+            env = {**os.environ, "HTTP_PROXY": _PROXY, "HTTPS_PROXY": _PROXY,
+                   "http_proxy": _PROXY, "https_proxy": _PROXY}
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -46,6 +62,7 @@ def run(
             timeout=timeout,
             cwd=cwd,
             input=stdin_data,
+            env=env,
         )
         out = result.stdout
         err = result.stderr

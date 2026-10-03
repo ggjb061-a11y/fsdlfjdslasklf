@@ -17,7 +17,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from scanner.utils import create_dirs, tools_status, run
+from scanner.utils import create_dirs, tools_status, run, set_proxy
 from scanner.models import ScanResult
 from scanner.recon import ReconModule
 from scanner.crawler import CrawlerModule
@@ -88,6 +88,8 @@ def cli() -> argparse.Namespace:
     p.add_argument("--skip-vuln", action="store_true")
     p.add_argument("--rate-limit", type=float, default=0,
                    help="Delay in seconds between requests (default: 0)")
+    p.add_argument("--proxy", help="HTTP/SOCKS proxy (e.g. http://127.0.0.1:8080 for Burp/ZAP)")
+    p.add_argument("--wordlist", help="Custom wordlist path for directory brute-force")
     p.add_argument("--webhook", help="Webhook URL for scan completion notification (Slack/Discord)")
     p.add_argument("-v", "--verbose", action="store_true")
     p.add_argument("--confirm", action="store_true", help="Skip authorization prompt")
@@ -172,6 +174,8 @@ def scan_target(target: str, args: argparse.Namespace) -> ScanResult:
         result.whois = recon.whois
         result.waf = recon.waf
         result.ports_raw = recon.ports_raw
+        result.google_dorks = recon.google_dorks
+        result.findings.extend(getattr(recon, 'findings', []))
         log.info(f"  Subdomains: {len(result.subdomains)} | Live: {len(result.live_hosts)}")
 
     # ── Phase 2: Passive Intelligence ─────────────────────────────────────
@@ -200,7 +204,7 @@ def scan_target(target: str, args: argparse.Namespace) -> ScanResult:
         analyzer = JSAnalyzer(dirs, js_urls, threads=args.threads)
         secrets, endpoints, js_findings = analyzer.run()
         result.js_secrets = secrets
-        result.js_endpoints = endpoints
+        result.js_endpoints = list(endpoints) if not isinstance(endpoints, list) else endpoints
         result.findings.extend(js_findings)
         log.info(f"  JS secrets: {len(secrets)} | Endpoints: {len(endpoints)}")
 
@@ -224,7 +228,8 @@ def scan_target(target: str, args: argparse.Namespace) -> ScanResult:
     # ── Phase 7: Vuln Scanning ────────────────────────────────────────────
     if should("vuln"):
         phase_banner(log, "PHASE 7 – VULNERABILITY SCANNING")
-        vuln = VulnScanner(target, dirs, result.live_hosts, threads=args.threads)
+        vuln = VulnScanner(target, dirs, result.live_hosts, threads=args.threads,
+                           wordlist=args.wordlist)
         vuln_findings = vuln.run()
         result.findings.extend(vuln_findings)
 
@@ -292,6 +297,9 @@ def main() -> None:
         if ans != "yes":
             print("  Aborted.")
             sys.exit(0)
+
+    if args.proxy:
+        set_proxy(args.proxy)
 
     start = time.time()
 

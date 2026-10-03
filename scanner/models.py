@@ -65,7 +65,7 @@ class ScanResult:
     target: str
     scan_date: str
     base_dir: str
-    hosts: list = field(default_factory=list)          # list[HostRecord]
+    host_records: list = field(default_factory=list)    # list[HostRecord]
     subdomains: list = field(default_factory=list)      # list[str]
     live_hosts: list = field(default_factory=list)      # list[str] bare URLs
     urls: list = field(default_factory=list)            # list[URLRecord]
@@ -74,10 +74,13 @@ class ScanResult:
     whois: str = ""
     waf: str = ""
     js_secrets: list = field(default_factory=list)      # list[JSSecret]
+    js_endpoints: list = field(default_factory=list)    # list[str]
+    ports_raw: list = field(default_factory=list)       # list[str]
     allowed_methods: dict = field(default_factory=dict) # host -> [methods]
     emails: list = field(default_factory=list)          # list[str]
     cms_info: dict = field(default_factory=dict)        # host -> cms string
     found_params: dict = field(default_factory=dict)    # url -> [param names]
+    google_dorks: list = field(default_factory=list)    # list[str]
 
     def sorted_findings(self) -> list:
         return sorted(self.findings, key=lambda f: f.sev_order())

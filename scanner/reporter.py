@@ -4,7 +4,6 @@ Produces a clean, professional, dark-themed report with collapsible sections.
 """
 import json
 import logging
-from datetime import datetime
 from pathlib import Path
 from jinja2 import Environment, BaseLoader
 
@@ -334,6 +333,28 @@ ul.ls li{color:var(--tx2);font-size:13px;margin-bottom:2px}
   </div>
 </section>
 
+<!-- ─── GOOGLE DORKS ──────────────────────────────────────────────────── -->
+<section id="s-dorks" class="closed">
+  <h2 onclick="T('s-dorks')">Google Dorks<span class="cnt">({{ google_dorks|length }})</span></h2>
+  <div class="bd">
+  {% if google_dorks %}
+  <p style="margin-bottom:8px;color:var(--tx2)">Copy these into Google for manual reconnaissance:</p>
+  <table>
+    <thead><tr><th>#</th><th>Dork Query</th><th>Link</th></tr></thead>
+    <tbody>
+    {% for dork in google_dorks %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td><code>{{ dork }}</code></td>
+      <td><a href="https://www.google.com/search?q={{ dork|urlencode }}" target="_blank">Search</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="empty">No dork queries generated.</p>{% endif %}
+  </div>
+</section>
+
 </div>
 <script>
 function T(id){document.getElementById(id).classList.toggle('closed')}
@@ -367,6 +388,7 @@ def generate(result) -> str:
         emails=getattr(result, "emails", []),
         cms_info=getattr(result, "cms_info", {}),
         found_params=getattr(result, "found_params", {}),
+        google_dorks=getattr(result, "google_dorks", []),
     )
 
     html_path = f"{result.base_dir}/06_reports/report.html"
@@ -403,6 +425,7 @@ def generate(result) -> str:
         "emails": getattr(result, "emails", []),
         "cms_info": getattr(result, "cms_info", {}),
         "found_params": getattr(result, "found_params", {}),
+        "google_dorks": getattr(result, "google_dorks", []),
     }
     json_path = f"{result.base_dir}/06_reports/summary.json"
     Path(json_path).write_text(json.dumps(summary, indent=2, default=str, ensure_ascii=False))
