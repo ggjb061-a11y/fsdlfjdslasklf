@@ -154,5 +154,106 @@ class TestSqlmapFindingShape(unittest.TestCase):
                 self.assertIn("time-based", findings[0].tags)
 
 
+class TestSQLiDualConfirmationCorrelator(unittest.TestCase):
+    """Verify VulnScanner._correlate_sqli emits DUAL-CONFIRMED when both
+    the built-in SQLi engine and sqlmap flag the same (host, param)."""
+
+    def _vs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dirs = create_dirs(tmp, "example.com")
+            from scanner.vulnscan import VulnScanner
+            vs = VulnScanner(target="example.com", dirs=dirs,
+                             live_hosts=["https://example.com"], threads=1)
+            return vs
+
+    def test_dual_confirmation_emits_merged_finding(self):
+        from scanner.models import Finding
+        vs = self._vs()
+        vs.findings = [
+            Finding(
+                severity="critical",
+                title="SQL Injection (error-based, MySQL) via 'id' [built-in]",
+                host="https://example.com",
+                detail="d1", source="sqli",
+                url="https://example.com/?id=',",
+                tags=["sqli", "error-based", "mysql", "param:id", "detector:builtin"],
+                evidence="signature=mysql_fetch",
+            ),
+            Finding(
+                severity="critical",
+                title="SQL Injection (time-based) via 'id' [sqlmap]",
+                host="https://example.com/?id=1",
+                detail="d2", source="sqlmap",
+                url="https://example.com/?id=1",
+                tags=["sqli", "sqlmap", "time-based", "param:id", "detector:sqlmap"],
+                evidence="Payload: id=1 AND SLEEP(5)",
+            ),
+        ]
+        vs._correlate_sqli()
+        dual = [f for f in vs.findings if "DUAL-CONFIRMED" in f.title]
+        self.assertEqual(len(dual), 1)
+        self.assertEqual(dual[0].source, "correlator")
+        self.assertIn("dual-confirmed", dual[0].tags)
+        self.assertIn("high-confidence", dual[0].tags)
+        self.assertIn("param:id", dual[0].tags)
+        # built-in + sqlmap evidence are both carried
+        self.assertIn("built-in evidence:", dual[0].evidence)
+        self.assertIn("sqlmap evidence:", dual[0].evidence)
+
+    def test_builtin_only_does_not_emit_dual(self):
+        from scanner.models import Finding
+        vs = self._vs()
+        vs.findings = [
+            Finding(
+                severity="critical",
+                title="SQL Injection via 'id' [built-in]",
+                host="https://example.com",
+                detail="d", source="sqli", url="https://example.com/?id=1",
+                tags=["sqli", "param:id", "detector:builtin"],
+                evidence="x",
+            ),
+        ]
+        before = len(vs.findings)
+        vs._correlate_sqli()
+        # No DUAL added because sqlmap didn't confirm
+        self.assertFalse(any("DUAL-CONFIRMED" in f.title for f in vs.findings))
+        self.assertEqual(len(vs.findings), before)
+
+    def test_sqlmap_only_does_not_emit_dual(self):
+        from scanner.models import Finding
+        vs = self._vs()
+        vs.findings = [
+            Finding(
+                severity="critical",
+                title="SQL Injection via 'id' [sqlmap]",
+                host="https://example.com/?id=1",
+                detail="d", source="sqlmap", url="https://example.com/?id=1",
+                tags=["sqli", "sqlmap", "param:id", "detector:sqlmap"],
+                evidence="payload",
+            ),
+        ]
+        vs._correlate_sqli()
+        self.assertFalse(any("DUAL-CONFIRMED" in f.title for f in vs.findings))
+
+    def test_different_param_no_dual(self):
+        """Same host but different params - must not merge into one DUAL."""
+        from scanner.models import Finding
+        vs = self._vs()
+        vs.findings = [
+            Finding(
+                severity="critical", title="x [built-in]", host="https://example.com",
+                detail="d", source="sqli", url="x",
+                tags=["sqli", "param:id", "detector:builtin"], evidence="e",
+            ),
+            Finding(
+                severity="critical", title="x [sqlmap]", host="https://example.com",
+                detail="d", source="sqlmap", url="x",
+                tags=["sqli", "sqlmap", "param:other", "detector:sqlmap"], evidence="e",
+            ),
+        ]
+        vs._correlate_sqli()
+        self.assertFalse(any("DUAL-CONFIRMED" in f.title for f in vs.findings))
+
+
 if __name__ == "__main__":
     unittest.main()

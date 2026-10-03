@@ -116,16 +116,18 @@ class SQLInjectionCheck(BaseCheck):
                     if sig in body_lower and sig not in baseline_lower:
                         self.findings.append(Finding(
                             severity="critical",
-                            title=f"SQL Injection (error-based, {engine}) via '{param}'",
+                            title=f"SQL Injection (error-based, {engine}) via '{param}' [built-in]",
                             host=base,
                             detail=(
+                                f"Detector: AutoVulnScan built-in SQLi engine.\n"
                                 f"Parameter '{param}' triggers {engine} error signature "
                                 f"'{sig}' with payload {payload!r}. Error absent from "
                                 f"benign baseline, confirming parameter reaches the SQL layer."
                             ),
                             source="sqli",
                             url=self._url(base, param, payload),
-                            tags=["sqli", "error-based", engine.lower()],
+                            tags=["sqli", "error-based", engine.lower(),
+                                  f"param:{param}", "detector:builtin"],
                             evidence=f"signature={sig} | payload={payload}",
                         ))
                         return True
@@ -142,9 +144,10 @@ class SQLInjectionCheck(BaseCheck):
             if delta_t < 50 and delta_f > 500 and len(t_body) != len(f_body):
                 self.findings.append(Finding(
                     severity="critical",
-                    title=f"SQL Injection (boolean-based) via '{param}'",
+                    title=f"SQL Injection (boolean-based) via '{param}' [built-in]",
                     host=base,
                     detail=(
+                        f"Detector: AutoVulnScan built-in SQLi engine.\n"
                         f"Parameter '{param}' shows boolean-based SQLi: "
                         f"'{t_payload}' matches baseline (delta {delta_t}B) while "
                         f"'{f_payload}' diverges by {delta_f}B. Content-length comparison "
@@ -152,7 +155,7 @@ class SQLInjectionCheck(BaseCheck):
                     ),
                     source="sqli",
                     url=self._url(base, param, f"1{t_payload}"),
-                    tags=["sqli", "boolean-based"],
+                    tags=["sqli", "boolean-based", f"param:{param}", "detector:builtin"],
                     evidence=f"TRUE-delta={delta_t}B FALSE-delta={delta_f}B",
                 ))
                 return True
@@ -171,16 +174,18 @@ class SQLInjectionCheck(BaseCheck):
                 if rc2 == 0 and elapsed2 >= 4.5:
                     self.findings.append(Finding(
                         severity="critical",
-                        title=f"SQL Injection (time-based blind, {engine}) via '{param}'",
+                        title=f"SQL Injection (time-based blind, {engine}) via '{param}' [built-in]",
                         host=base,
                         detail=(
+                            f"Detector: AutoVulnScan built-in SQLi engine.\n"
                             f"Parameter '{param}' triggers a {engine} sleep: baseline "
                             f"{baseline_time:.1f}s vs injected {elapsed:.1f}s / {elapsed2:.1f}s "
                             f"(both ≥4.5s). Two consecutive confirmations reduce flake risk."
                         ),
                         source="sqli",
                         url=self._url(base, param, f"1{payload}"),
-                        tags=["sqli", "time-based", engine.lower()],
+                        tags=["sqli", "time-based", engine.lower(),
+                              f"param:{param}", "detector:builtin"],
                         evidence=f"baseline={baseline_time:.1f}s inject={elapsed:.1f}s re-check={elapsed2:.1f}s",
                     ))
                     return True
@@ -199,15 +204,16 @@ class SQLInjectionCheck(BaseCheck):
                         if sig in body_lower and sig not in baseline_lower:
                             self.findings.append(Finding(
                                 severity="high",
-                                title=f"SQL Injection (UNION probe) via '{param}'",
+                                title=f"SQL Injection (UNION probe) via '{param}' [built-in]",
                                 host=base,
                                 detail=(
+                                    f"Detector: AutoVulnScan built-in SQLi engine.\n"
                                     f"ORDER BY column enumeration causes DB error at col_count={col_count}, "
                                     f"suggesting the parameter is inside a UNION-compatible SELECT."
                                 ),
                                 source="sqli",
                                 url=self._url(base, param, payload),
-                                tags=["sqli", "union-based"],
+                                tags=["sqli", "union-based", f"param:{param}", "detector:builtin"],
                                 evidence=f"ORDER BY {col_count} -> {sig}",
                             ))
                             return True

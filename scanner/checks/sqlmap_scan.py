@@ -166,16 +166,18 @@ class SqlmapCheck(BaseCheck):
                 tech_short = technique.split()[0].lower() if technique else "unknown"
                 self.findings.append(Finding(
                     severity="critical",
-                    title=f"SQL Injection confirmed by sqlmap ({tech_short}) via '{inj['parameter']}'",
+                    title=f"SQL Injection ({tech_short}) via '{inj['parameter']}' [sqlmap]",
                     host=url,
                     detail=(
+                        f"Detector: sqlmap.\n"
                         f"sqlmap confirmed SQL injection on parameter '{inj['parameter']}' "
                         f"at {url}. Technique: {technique}. "
                         f"Title: {inj['title']}."
                     ),
                     source="sqlmap",
                     url=url,
-                    tags=["sqli", "sqlmap", "confirmed", tech_short],
+                    tags=["sqli", "sqlmap", "confirmed", tech_short,
+                          f"param:{inj['parameter']}", "detector:sqlmap"],
                     evidence=f"Payload: {inj['payload']}",
                 ))
         self.log.info(f"  sqlmap: {len(self.findings)} finding(s)")
