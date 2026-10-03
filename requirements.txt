@@ -1,3 +1,4 @@
 requests>=2.28.0
 Jinja2>=3.1.0
 click>=8.0.0
+defusedxml>=0.7.1

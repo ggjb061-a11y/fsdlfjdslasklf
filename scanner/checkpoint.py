@@ -7,9 +7,20 @@ State file: <base_dir>/.checkpoint.json
 import json
 import logging
 from pathlib import Path
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, is_dataclass, fields
 
 logger = logging.getLogger("autoscan.checkpoint")
+
+
+def _safe_init(cls, data: dict):
+    """Build cls(**data) tolerating extra/missing fields from older checkpoints."""
+    known = {f.name for f in fields(cls)}
+    filtered = {k: v for k, v in data.items() if k in known}
+    try:
+        return cls(**filtered)
+    except TypeError as exc:
+        logger.warning(f"  Could not restore {cls.__name__}: {exc}")
+        return None
 
 
 class CheckpointManager:
@@ -64,6 +75,9 @@ class CheckpointManager:
 
         data = self.state.get("data", {})
 
+        def _list(cls, items):
+            return [x for x in (_safe_init(cls, i) for i in (items or [])) if x is not None]
+
         if "recon" in data:
             r = data["recon"]
             result.subdomains = r.get("subdomains", [])
@@ -73,32 +87,32 @@ class CheckpointManager:
             result.waf = r.get("waf", "")
             result.ports_raw = r.get("ports_raw", [])
             result.google_dorks = r.get("google_dorks", [])
-            result.host_records = [HostRecord(**h) for h in r.get("host_records", [])]
+            result.host_records = _list(HostRecord, r.get("host_records", []))
 
         if "passive" in data:
             p = data["passive"]
-            result.urls.extend([URLRecord(**u) for u in p.get("urls", [])])
-            result.findings.extend([Finding(**f) for f in p.get("findings", [])])
+            result.urls.extend(_list(URLRecord, p.get("urls", [])))
+            result.findings.extend(_list(Finding, p.get("findings", [])))
             result.emails = p.get("emails", [])
             result.cms_info = p.get("cms_info", {})
 
         if "crawl" in data:
             c = data["crawl"]
-            result.urls.extend([URLRecord(**u) for u in c.get("urls", [])])
+            result.urls.extend(_list(URLRecord, c.get("urls", [])))
 
         if "js" in data:
             j = data["js"]
-            result.js_secrets = [JSSecret(**s) for s in j.get("secrets", [])]
+            result.js_secrets = _list(JSSecret, j.get("secrets", []))
             result.js_endpoints = j.get("endpoints", [])
-            result.findings.extend([Finding(**f) for f in j.get("findings", [])])
+            result.findings.extend(_list(Finding, j.get("findings", [])))
 
         if "params" in data:
             result.found_params = data["params"].get("found_params", {})
-            result.findings.extend([Finding(**f) for f in data["params"].get("findings", [])])
+            result.findings.extend(_list(Finding, data["params"].get("findings", [])))
 
         if "methods" in data:
             result.allowed_methods = data["methods"].get("allowed_methods", {})
-            result.findings.extend([Finding(**f) for f in data["methods"].get("findings", [])])
+            result.findings.extend(_list(Finding, data["methods"].get("findings", [])))
 
         if "vuln" in data:
-            result.findings.extend([Finding(**f) for f in data["vuln"].get("findings", [])])
+            result.findings.extend(_list(Finding, data["vuln"].get("findings", [])))

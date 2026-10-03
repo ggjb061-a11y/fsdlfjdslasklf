@@ -5,10 +5,20 @@ email harvesting, screenshot capture, S3 bucket detection.
 import re
 import json
 import logging
-import xml.etree.ElementTree as ET
 from pathlib import Path
+try:
+    from defusedxml.ElementTree import fromstring as _xml_fromstring
+    from defusedxml import ParseError as _XMLParseError
+    _USING_DEFUSED = True
+except ImportError:
+    import xml.etree.ElementTree as _ET
+    _xml_fromstring = _ET.fromstring
+    _XMLParseError = _ET.ParseError
+    _USING_DEFUSED = False
 from .utils import which, run, read_lines, write_lines, categorize_url
 from .models import URLRecord, Finding
+
+MAX_SITEMAP_SIZE = 10 * 1024 * 1024  # 10 MB cap for untrusted XML bodies
 
 logger = logging.getLogger("autoscan.passive")
 
@@ -54,7 +64,7 @@ class PassiveModule:
                 line = line.strip()
                 low = line.lower()
                 if low.startswith("disallow:") or low.startswith("allow:"):
-                    path = line.split(":", 1)[1].strip()
+                    path = line.split(":", 1)[1].split("#", 1)[0].strip()
                     if path and path != "/" and not path.startswith("#"):
                         paths.add(path)
                         full = f"{base}{path}" if path.startswith("/") else f"{base}/{path}"
@@ -107,10 +117,18 @@ class PassiveModule:
         )
         if rc != 0 or not body or "<" not in body:
             return
+        if len(body) > MAX_SITEMAP_SIZE:
+            logger.warning(f"  sitemap {url} exceeds {MAX_SITEMAP_SIZE} bytes; refusing to parse")
+            return
+
+        if not _USING_DEFUSED:
+            if "<!ENTITY" in body or "<!DOCTYPE" in body:
+                logger.warning(f"  sitemap {url} contains DOCTYPE/ENTITY and defusedxml is unavailable; refusing to parse")
+                return
 
         try:
-            root = ET.fromstring(body)
-        except ET.ParseError:
+            root = _xml_fromstring(body)
+        except _XMLParseError:
             return
 
         ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}

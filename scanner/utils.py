@@ -5,11 +5,20 @@ import logging
 import json
 import re
 import socket
+import threading
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Tuple
 
 logger = logging.getLogger("autoscan.utils")
+
+# curl --max-filesize default (10 MB) applied to every curl request made
+# through run() to avoid DoS by hostile targets returning multi-GB bodies.
+CURL_MAX_FILESIZE = 10 * 1024 * 1024
+# curl --max-redirs: cap redirect chain length to prevent redirect-based SSRF
+# into cloud metadata (169.254.169.254) etc.
+CURL_MAX_REDIRS = 3
 
 # ─── Tool detection ───────────────────────────────────────────────────────────
 
@@ -30,12 +39,20 @@ _AUTH_HEADERS: List[str] = []
 _COOKIE: Optional[str] = None
 _BASIC_AUTH: Optional[str] = None
 
+# Rate-limiter state (thread-safe)
+_RATE_LIMIT: float = 0.0
+_LAST_REQUEST_LOCK = threading.Lock()
+_LAST_REQUEST_TIME: float = 0.0
+
+
 def set_proxy(proxy: Optional[str]) -> None:
     global _PROXY
     _PROXY = proxy
 
+
 def get_proxy() -> Optional[str]:
     return _PROXY
+
 
 def set_auth(headers: list = None, cookie: str = None,
              bearer: str = None, basic: str = None) -> None:
@@ -47,8 +64,27 @@ def set_auth(headers: list = None, cookie: str = None,
     _COOKIE = cookie
     _BASIC_AUTH = basic
 
+
 def get_auth() -> dict:
     return {"headers": _AUTH_HEADERS, "cookie": _COOKIE, "basic": _BASIC_AUTH}
+
+
+def set_rate_limit(delay_seconds: float) -> None:
+    """Set a global inter-request delay (in seconds) for every outbound curl."""
+    global _RATE_LIMIT
+    _RATE_LIMIT = max(0.0, float(delay_seconds))
+
+
+def _apply_rate_limit() -> None:
+    global _LAST_REQUEST_TIME
+    if _RATE_LIMIT <= 0:
+        return
+    with _LAST_REQUEST_LOCK:
+        now = time.monotonic()
+        elapsed = now - _LAST_REQUEST_TIME
+        if elapsed < _RATE_LIMIT:
+            time.sleep(_RATE_LIMIT - elapsed)
+        _LAST_REQUEST_TIME = time.monotonic()
 
 def run(
     cmd: List[str],
@@ -63,8 +99,10 @@ def run(
     Writes stdout to output_file if provided.
     Never raises on tool-not-found or timeout – returns negative rc.
     """
-    if cmd and cmd[0] == "curl":
-        prefix = [cmd[0]]
+    if cmd and (cmd[0] == "curl" or cmd[0].endswith("/curl")):
+        _apply_rate_limit()
+        prefix = [cmd[0], "--max-filesize", str(CURL_MAX_FILESIZE),
+                 "--max-redirs", str(CURL_MAX_REDIRS)]
         if _PROXY:
             prefix += ["--proxy", _PROXY]
         for hdr in _AUTH_HEADERS:

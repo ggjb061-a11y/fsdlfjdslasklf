@@ -19,7 +19,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from scanner.utils import create_dirs, tools_status, run, set_proxy, set_auth
+from scanner.utils import create_dirs, tools_status, run, set_proxy, set_auth, set_rate_limit
+from scanner.validators import validate_target, validate_webhook_url, ValidationError
 from scanner.models import ScanResult
 from scanner.recon import ReconModule
 from scanner.crawler import CrawlerModule
@@ -116,8 +117,9 @@ def cli() -> argparse.Namespace:
                    help="Delay in seconds between requests (default: 0)")
     p.add_argument("--proxy", help="HTTP/SOCKS proxy (e.g. http://127.0.0.1:8080)")
     p.add_argument("--wordlist", help="Custom wordlist for directory brute-force")
-    p.add_argument("--format", choices=["all", "html", "json", "markdown"], default="all",
-                   help="Output format(s) (default: all)")
+    p.add_argument("--format", choices=["all", "html", "json", "markdown", "sarif", "csv"],
+                   default="all",
+                   help="Output format(s) (default: all = html+json+markdown+sarif+csv)")
     p.add_argument("--fail-on", choices=["critical", "high", "medium", "low"],
                    help="Exit with non-zero code if findings at or above this severity exist")
     p.add_argument("--cookie", help="Cookie header value for authenticated scans")
@@ -148,6 +150,11 @@ def phase_banner(log, title: str) -> None:
 
 def send_webhook(url: str, target: str, counts: dict, report_path: str) -> None:
     """Send scan completion notification via webhook (Slack/Discord compatible)."""
+    try:
+        validated = validate_webhook_url(url)
+    except ValidationError as exc:
+        logging.getLogger("autoscan").error(f"  Webhook URL invalid: {exc}")
+        return
     payload = {
         "text": (
             f"*AutoVulnScan Complete* - `{target}`\n"
@@ -159,29 +166,15 @@ def send_webhook(url: str, target: str, counts: dict, report_path: str) -> None:
     run(
         ["curl", "-s", "--max-time", "10", "-X", "POST",
          "-H", "Content-Type: application/json",
-         "-d", json.dumps(payload), url],
+         "-d", json.dumps(payload), "--", validated],
         timeout=15,
     )
-
-
-def run_phase(name: str, cm: CheckpointManager, func, log, data_getter=None):
-    """Execute a phase respecting checkpoints.
-
-    func is called with no args; data_getter (optional) is called after func
-    returns to extract the data to persist to the checkpoint.
-    """
-    if cm.is_done(name):
-        log.info(f"  [SKIP] Phase '{name}' already complete (from checkpoint)")
-        return None
-    result = func()
-    data = data_getter(result) if data_getter else None
-    cm.mark_done(name, data or {})
-    return result
 
 
 def scan_target(target: str, args: argparse.Namespace, resume_dir: str = None) -> ScanResult:
     """Run the full scan pipeline on a single target."""
     target = target.removeprefix("https://").removeprefix("http://").rstrip("/")
+    target = validate_target(target)
 
     if resume_dir:
         base = Path(resume_dir)
@@ -352,7 +345,7 @@ def scan_target(target: str, args: argparse.Namespace, resume_dir: str = None) -
         cm.mark_done("vuln", {"findings": [vars(f) for f in vuln_findings]})
 
     phase_banner(log, "PHASE 8 - GENERATING REPORT")
-    formats = ["html", "json", "markdown"] if args.format == "all" else [args.format]
+    formats = ["html", "json", "markdown", "sarif", "csv"] if args.format == "all" else [args.format]
     report_path = generate(result, formats=formats)
     counts = result.count_by_severity()
 
@@ -457,6 +450,8 @@ def main() -> None:
         bearer=args.bearer,
         basic=args.basic_auth,
     )
+    if args.rate_limit > 0:
+        set_rate_limit(args.rate_limit)
 
     start = time.time()
 

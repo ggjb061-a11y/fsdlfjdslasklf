@@ -12,6 +12,7 @@ from .checks import (
     SSRFCheck, XXECheck, SSTICheck, PathTraversalCheck,
     SQLInjectionCheck, CommandInjectionCheck,
     NoSQLInjectionCheck, JWTWeaknessCheck,
+    DeserializationCheck, CSPCookieCheck, LDAPInjectionCheck,
     NucleiScan, NiktoScan, DirBruteCheck,
     TakeoverCheck, Bypass403Check, OpenRedirectCheck,
 )
@@ -42,6 +43,9 @@ class VulnScanner:
         CommandInjectionCheck,
         NoSQLInjectionCheck,
         JWTWeaknessCheck,
+        DeserializationCheck,
+        CSPCookieCheck,
+        LDAPInjectionCheck,
         NucleiScan,
         NiktoScan,
         DirBruteCheck,

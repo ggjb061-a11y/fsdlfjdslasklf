@@ -8,6 +8,7 @@ from scanner.checks import (
     SSRFCheck, XXECheck, SSTICheck, PathTraversalCheck,
     SQLInjectionCheck, CommandInjectionCheck,
     NoSQLInjectionCheck, JWTWeaknessCheck,
+    DeserializationCheck, CSPCookieCheck, LDAPInjectionCheck,
     Bypass403Check, OpenRedirectCheck, DirBruteCheck,
     ALL_CHECKS,
 )
@@ -17,7 +18,7 @@ from scanner.utils import create_dirs
 
 class TestChecksRegistry(unittest.TestCase):
     def test_all_checks_registered(self):
-        self.assertGreaterEqual(len(ALL_CHECKS), 22)
+        self.assertGreaterEqual(len(ALL_CHECKS), 25)
         for cls in ALL_CHECKS:
             self.assertTrue(issubclass(cls, BaseCheck),
                             f"{cls.__name__} must subclass BaseCheck")
@@ -96,6 +97,30 @@ class TestCheckStaticData(unittest.TestCase):
     def test_nosql_injection(self):
         self.assertGreater(len(NoSQLInjectionCheck.NOSQL_PAYLOADS), 2)
         self.assertGreater(len(NoSQLInjectionCheck.LOGIN_PATHS), 3)
+
+    def test_deserialization_signatures(self):
+        self.assertGreater(len(DeserializationCheck.SIGNATURES), 5)
+        names = [n for n, _ in DeserializationCheck.SIGNATURES]
+        self.assertIn("Java (ObjectInputStream)", names)
+        self.assertIn("PHP serialize", names)
+        self.assertIn("Python pickle (gASV)", names)
+
+    def test_csp_cookie_check(self):
+        import tempfile
+        from scanner.utils import create_dirs
+        with tempfile.TemporaryDirectory() as tmp:
+            dirs = create_dirs(tmp, "example.com")
+            check = CSPCookieCheck(target="example.com", dirs=dirs,
+                                   live_hosts=["https://example.com"], threads=1)
+            check._audit_csp("default-src 'self' 'unsafe-inline' 'unsafe-eval'",
+                             "https://example.com")
+            titles = [f.title for f in check.findings]
+            self.assertTrue(any("unsafe-inline" in t for t in titles))
+            self.assertTrue(any("unsafe-eval" in t for t in titles))
+
+    def test_ldap_payloads(self):
+        self.assertGreater(len(LDAPInjectionCheck.LDAP_PAYLOADS), 3)
+        self.assertIn("/login", LDAPInjectionCheck.LOGIN_PATHS)
 
 
 class TestJWTWeakness(unittest.TestCase):

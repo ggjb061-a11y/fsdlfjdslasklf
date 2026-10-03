@@ -399,7 +399,7 @@ def generate(result, formats: list = None) -> str:
     )
 
     first_path = None
-    from .output import generate_json, generate_markdown
+    from .output import generate_json, generate_markdown, generate_sarif, generate_csv
 
     if "html" in formats:
         html_path = f"{result.base_dir}/06_reports/report.html"
@@ -412,5 +412,11 @@ def generate(result, formats: list = None) -> str:
     if "markdown" in formats:
         md_path = generate_markdown(result)
         first_path = first_path or md_path
+    if "sarif" in formats:
+        sarif_path = generate_sarif(result)
+        first_path = first_path or sarif_path
+    if "csv" in formats:
+        csv_path = generate_csv(result)
+        first_path = first_path or csv_path
 
     return first_path or ""

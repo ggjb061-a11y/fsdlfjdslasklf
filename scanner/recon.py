@@ -504,10 +504,12 @@ class ReconModule:
             ("Sublist3r",              self._sublist3r),
             ("crt.sh (CT logs)",       self._crtsh),
             ("Reverse IP lookup",      self._reverse_ip),
+            # Virtual host discovery runs BEFORE dedup/httpx so new vhosts
+            # end up in all_subdomains.txt and get probed by httpx.
+            ("Virtual host discovery", self._vhost_discovery),
             ("Subdomain dedup",        self._deduplicate_subdomains),
             ("HTTP probe (httpx)",     self._httpx_probe),
-            ("Virtual host discovery", self._vhost_discovery),
-            ("Favicon hash",          self._favicon_hash),
+            ("Favicon hash",           self._favicon_hash),
             ("Google dorks",           self._google_dorks),
             ("Port scan (nmap)",       self._nmap),
             ("Port scan (masscan)",    self._masscan),

@@ -2,6 +2,83 @@
 
 Version numbers follow the project's own `scanner/__init__.py::__version__`.
 
+## 3.3.0 (2026-10-03) - Scanner-self-security + SARIF + 3 more vuln classes
+
+Driven by the second round of audit findings (105 raw -> 45 confirmed).
+Focus: hardening the scanner against hostile targets, real rate limiting,
+new vulnerability classes, more output formats.
+
+### Scanner self-security (new scanner/validators.py)
+- `validate_target()`: strict regex (RFC 1035 hostname / IP), rejects
+  leading `-`, path separators, shell meta-chars, control chars.
+  Prevents argument injection into every downstream tool.
+- `validate_webhook_url()`: requires http/https scheme, rejects `-`/`@`
+  prefixes, blocks private/loopback/link-local IPs by default. SSRF
+  guard for scanner-triggered callbacks.
+- `is_private_host()` helper for consumer modules.
+
+### Rate limiting that actually works (scanner/utils.py)
+- `set_rate_limit()` + `_apply_rate_limit()`: thread-safe lock enforces
+  inter-request delay against the wall clock. autoscan.py applies it
+  before every curl invocation (not just between targets).
+- Every curl command now carries `--max-filesize` (10 MB cap) and
+  `--max-redirs 3` to prevent DoS by hostile targets and redirect-based
+  SSRF to cloud metadata endpoints.
+
+### XXE protection in sitemap parsing (scanner/passive.py)
+- Switched to defusedxml (fallback to stdlib with DOCTYPE/ENTITY refusal).
+- Hard 10 MB cap on sitemap body before parsing (billion-laughs guard).
+- robots.txt disallow parser now strips inline comments.
+
+### 3 new vulnerability check classes (25 total, up from 22)
+- **DeserializationCheck**: 8 signature regexes for Java/PHP/.NET/
+  pickle/Ruby/Node serialized blobs scanned across Set-Cookie,
+  hidden form fields, URL params.
+- **CSPCookieCheck**: parses present CSP for `unsafe-inline`,
+  `unsafe-eval`, wildcard script sources, missing frame-ancestors;
+  audits every Set-Cookie for Secure/HttpOnly/SameSite and the
+  `__Host-`/`__Secure-` prefix rules.
+- **LDAPInjectionCheck**: 5 wildcard payloads against 7 login paths,
+  with baseline comparison for auth bypass and error-signature matching.
+
+### 2 new output formats (5 total)
+- **SARIF 2.1.0** (scanner/output/sarif_report.py): GitHub Advanced
+  Security code-scanning compatible. Severity maps to error/warning/note.
+  Rules deduplicated by source.
+- **CSV** (scanner/output/csv_report.py): findings as spreadsheet rows
+  for triage.
+- `--format` CLI extended: `{all, html, json, markdown, sarif, csv}`.
+  `all` emits all five.
+
+### Correctness fixes from this round
+- CheckpointManager tolerates added/removed dataclass fields via
+  `_safe_init()` filter - older checkpoints no longer kill resume.
+- `run_phase` dead helper deleted from autoscan.py.
+- Vhost discovery reordered to run BEFORE dedup+httpx so new vhosts
+  land in all_subdomains.txt and get probed downstream.
+- webhook URL now goes through `--` separator in curl invocation.
+
+### Tests: 96 passing (up from 69)
+- `test_validators.py`: hostname/IP acceptance, flag rejection,
+  shell-meta rejection, webhook scheme + private-IP blocking.
+- `test_rate_limit.py`: zero-rate no-delay invariant + actual delay
+  enforcement with wall-clock timing.
+- `test_sarif_csv.py`: SARIF 2.1.0 shape, severity mapping, rule
+  deduplication, CSV field presence.
+- `test_checks.py` extended: deserialization signatures, CSP finding
+  emission, LDAP payload counts.
+
+### Files Added
+- `scanner/validators.py`
+- `scanner/checks/deserialization.py`
+- `scanner/checks/csp_cookies.py`
+- `scanner/checks/ldap_injection.py`
+- `scanner/output/sarif_report.py`
+- `scanner/output/csv_report.py`
+- `tests/test_validators.py`
+- `tests/test_rate_limit.py`
+- `tests/test_sarif_csv.py`
+
 ## 3.2.0 (2026-10-03) - Post-audit hardening
 
 Driven by findings from a multi-agent audit (6 dimensions, adversarial

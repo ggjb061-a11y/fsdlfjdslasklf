@@ -15,6 +15,9 @@ from .sql_injection import SQLInjectionCheck
 from .cmd_injection import CommandInjectionCheck
 from .nosql_injection import NoSQLInjectionCheck
 from .jwt_weakness import JWTWeaknessCheck
+from .deserialization import DeserializationCheck
+from .csp_cookies import CSPCookieCheck
+from .ldap_injection import LDAPInjectionCheck
 from .nuclei_scan import NucleiScan
 from .nikto_scan import NiktoScan
 from .dirbrute import DirBruteCheck
@@ -39,6 +42,9 @@ ALL_CHECKS = [
     CommandInjectionCheck,
     NoSQLInjectionCheck,
     JWTWeaknessCheck,
+    DeserializationCheck,
+    CSPCookieCheck,
+    LDAPInjectionCheck,
     NucleiScan,
     NiktoScan,
     DirBruteCheck,
