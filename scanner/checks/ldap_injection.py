@@ -59,12 +59,20 @@ class LDAPInjectionCheck(BaseCheck):
                         continue
                     body_lower = body.lower()
                     for sig in self.LDAP_ERROR_SIGS:
-                        if sig in body_lower:
+                        # Baseline guard: if the benign login response
+                        # already contains this LDAP error string (e.g. the
+                        # endpoint always surfaces LDAP error text), it's
+                        # not caused by our payload.
+                        if sig in body_lower and sig not in baseline_body:
                             self.findings.append(Finding(
                                 severity="high",
                                 title="LDAP Injection - Error Signature",
                                 host=base,
-                                detail=f"Payload triggered LDAP error at {url}: {sig}",
+                                detail=(
+                                    f"Payload triggered LDAP error at {url}: {sig}. "
+                                    "Benign login did not trigger the error, so the "
+                                    "injected characters reached the LDAP filter."
+                                ),
                                 source="ldap_injection",
                                 url=url,
                                 evidence=sig,
