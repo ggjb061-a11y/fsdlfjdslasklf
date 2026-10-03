@@ -93,6 +93,21 @@ go_install gobuster     "github.com/OJ/gobuster/v3@latest"
 go_install ffuf         "github.com/ffuf/ffuf/v2@latest"
 go_install gospider     "github.com/jaeles-project/gospider@latest"
 go_install subjack      "github.com/haccer/subjack@latest"
+go_install gowitness    "github.com/sensepost/gowitness@latest"
+
+# ── Python-based tools ───────────────────────────────────────
+pip_install() {
+    local name=$1 pkg=${2:-$1}
+    if command -v "$name" &>/dev/null; then
+        ok "$name already installed"
+        return
+    fi
+    echo "[*] Installing $name..."
+    pip3 install -q "$pkg" 2>/dev/null && ok "$name installed" || warn "$name failed"
+}
+
+pip_install arjun
+pip_install paramspider
 
 # ── Nuclei templates ─────────────────────────────────────────
 if command -v nuclei &>/dev/null; then

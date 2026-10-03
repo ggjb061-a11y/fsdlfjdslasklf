@@ -106,6 +106,50 @@ class ReconModule:
         run(["sublist3r", "-d", self.target, "-o", out, "-n"], timeout=300)
         self.subdomains += read_lines(out)
 
+    def _crtsh(self) -> None:
+        """Certificate Transparency log search via crt.sh (free, no API key)."""
+        import json as _json
+        out = f"{self.dirs['subdomains']}/crtsh.txt"
+        url = f"https://crt.sh/?q=%25.{self.target}&output=json"
+        rc, stdout, _ = run(
+            ["curl", "-s", "--max-time", "30", "--compressed", url],
+            timeout=40,
+        )
+        if rc != 0 or not stdout.strip():
+            logger.debug("crt.sh returned no data")
+            return
+        try:
+            entries = _json.loads(stdout)
+        except Exception:
+            return
+        subs = set()
+        for entry in entries:
+            name = entry.get("name_value", "")
+            for line in name.split("\n"):
+                d = line.strip().lstrip("*.").lower()
+                if d.endswith(self.target) and d != self.target:
+                    subs.add(d)
+        self.subdomains += list(subs)
+        write_lines(out, sorted(subs))
+        logger.info(f"  crt.sh: {len(subs)} subdomains")
+
+    def _reverse_ip(self) -> None:
+        """Resolve target IP and look for other domains sharing the same IP."""
+        ip = resolve_ip(self.target)
+        if not ip:
+            return
+        out = f"{self.dirs['recon']}/reverse_ip.txt"
+        # Use HackTarget free reverse IP (curl, no key)
+        rc, stdout, _ = run(
+            ["curl", "-s", "--max-time", "15",
+             f"https://api.hackertarget.com/reverseiplookup/?q={ip}"],
+            timeout=20,
+        )
+        if rc == 0 and stdout and "error" not in stdout.lower():
+            domains = [d.strip() for d in stdout.splitlines() if d.strip() and "API" not in d]
+            write_lines(out, domains)
+            logger.info(f"  Reverse IP ({ip}): {len(domains)} domains")
+
     def _deduplicate_subdomains(self) -> None:
         unique = sorted({
             s.strip().lower()
@@ -270,6 +314,8 @@ class ReconModule:
             ("Assetfinder",            self._assetfinder),
             ("Findomain",              self._findomain),
             ("Sublist3r",              self._sublist3r),
+            ("crt.sh (CT logs)",       self._crtsh),
+            ("Reverse IP lookup",      self._reverse_ip),
             ("Subdomain dedup",        self._deduplicate_subdomains),
             ("HTTP probe (httpx)",     self._httpx_probe),
             ("Port scan (nmap)",       self._nmap),

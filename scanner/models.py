@@ -75,6 +75,9 @@ class ScanResult:
     waf: str = ""
     js_secrets: list = field(default_factory=list)      # list[JSSecret]
     allowed_methods: dict = field(default_factory=dict) # host -> [methods]
+    emails: list = field(default_factory=list)          # list[str]
+    cms_info: dict = field(default_factory=dict)        # host -> cms string
+    found_params: dict = field(default_factory=dict)    # url -> [param names]
 
     def sorted_findings(self) -> list:
         return sorted(self.findings, key=lambda f: f.sev_order())

@@ -95,6 +95,7 @@ ul.ls li{color:var(--tx2);font-size:13px;margin-bottom:2px}
   <div class="card"><div class="n">{{ live_hosts|length }}</div><div class="l">Live Hosts</div></div>
   <div class="card"><div class="n">{{ urls|length }}</div><div class="l">URLs</div></div>
   <div class="card"><div class="n">{{ js_secrets|length }}</div><div class="l">JS Secrets</div></div>
+  <div class="card"><div class="n">{{ emails|length }}</div><div class="l">Emails</div></div>
 </div>
 
 <!-- ─── ALL FINDINGS ─────────────────────────────────────────────────── -->
@@ -258,6 +259,53 @@ ul.ls li{color:var(--tx2);font-size:13px;margin-bottom:2px}
   </div>
 </section>
 
+<!-- ─── DISCOVERED PARAMETERS ──────────────────────────────────────────── -->
+<section id="s-params" class="closed">
+  <h2 onclick="T('s-params')">Discovered Parameters<span class="cnt">({{ found_params|length }} endpoints)</span></h2>
+  <div class="bd">
+  {% if found_params %}
+  <table>
+    <thead><tr><th>Endpoint</th><th>Parameters</th></tr></thead>
+    <tbody>
+    {% for url, params in found_params.items() %}
+    <tr>
+      <td style="max-width:400px;word-break:break-all">{{ url }}</td>
+      <td>{% for p in params %}<span class="tag">{{ p }}</span>{% endfor %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="empty">No parameters discovered.</p>{% endif %}
+  </div>
+</section>
+
+<!-- ─── EMAILS ────────────────────────────────────────────────────────── -->
+<section id="s-emails" class="closed">
+  <h2 onclick="T('s-emails')">Emails<span class="cnt">({{ emails|length }})</span></h2>
+  <div class="bd">
+  {% if emails %}
+  <div class="flex">{% for e in emails %}<span class="chip">{{ e }}</span>{% endfor %}</div>
+  {% else %}<p class="empty">No emails found.</p>{% endif %}
+  </div>
+</section>
+
+<!-- ─── CMS ───────────────────────────────────────────────────────────── -->
+<section id="s-cms" class="closed">
+  <h2 onclick="T('s-cms')">CMS Detection</h2>
+  <div class="bd">
+  {% if cms_info %}
+  <table>
+    <thead><tr><th>Host</th><th>CMS / Framework</th></tr></thead>
+    <tbody>
+    {% for host, cms in cms_info.items() %}
+    <tr><td>{{ host }}</td><td><strong>{{ cms }}</strong></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="empty">No CMS detected.</p>{% endif %}
+  </div>
+</section>
+
 <!-- ─── PORTS ─────────────────────────────────────────────────────────── -->
 <section id="s-ports" class="closed">
   <h2 onclick="T('s-ports')">Open Ports</h2>
@@ -316,6 +364,9 @@ def generate(result) -> str:
         ports=getattr(result, "ports_raw", []),
         whois=result.whois,
         waf=result.waf,
+        emails=getattr(result, "emails", []),
+        cms_info=getattr(result, "cms_info", {}),
+        found_params=getattr(result, "found_params", {}),
     )
 
     html_path = f"{result.base_dir}/06_reports/report.html"
@@ -349,6 +400,9 @@ def generate(result) -> str:
         "urls_sensitive": [u.url for u in result.urls if u.is_sensitive_file],
         "urls_api": [u.url for u in result.urls if u.is_api],
         "urls_js": [u.url for u in result.urls if u.is_js],
+        "emails": getattr(result, "emails", []),
+        "cms_info": getattr(result, "cms_info", {}),
+        "found_params": getattr(result, "found_params", {}),
     }
     json_path = f"{result.base_dir}/06_reports/summary.json"
     Path(json_path).write_text(json.dumps(summary, indent=2, default=str, ensure_ascii=False))
