@@ -40,13 +40,20 @@ class NucleiScan(BaseCheck):
         for row in parse_jsonl(out_json):
             info = row.get("info", {})
             sev = info.get("severity", "info").lower()
+            raw_tags = info.get("tags") or []
+            if isinstance(raw_tags, str):
+                tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
+            elif isinstance(raw_tags, list):
+                tags = raw_tags
+            else:
+                tags = []
             self.findings.append(Finding(
                 severity=sev,
                 title=info.get("name", row.get("template-id", "?")),
                 host=row.get("host", ""),
                 detail=info.get("description", ""),
                 source="nuclei",
-                tags=(info.get("tags") or "").split(","),
+                tags=tags,
                 url=row.get("matched-at", row.get("host", "")),
                 evidence=str(row.get("extracted-results", row.get("curl-command", ""))),
             ))

@@ -1,7 +1,5 @@
 """Reconnaissance: subdomains, DNS, WHOIS, port scanning, live host probing."""
-import hashlib
 import logging
-import struct
 from pathlib import Path
 from .utils import which, run, read_lines, write_lines, resolve_ip, resolve_all_ips
 from .models import HostRecord, Finding
@@ -127,11 +125,12 @@ class ReconModule:
         except Exception:
             return
         subs = set()
+        target_suffix = f".{self.target.lower()}"
         for entry in entries:
             name = entry.get("name_value", "")
             for line in name.split("\n"):
                 d = line.strip().lstrip("*.").lower()
-                if d.endswith(self.target) and d != self.target:
+                if d.endswith(target_suffix) and d != self.target.lower():
                     subs.add(d)
         self.subdomains += list(subs)
         write_lines(out, sorted(subs))
@@ -202,13 +201,16 @@ class ReconModule:
         out_file = f"{self.dirs['recon']}/vhosts.txt"
         found = []
 
-        rc, baseline, _ = run(
+        rc_base, baseline, _ = run(
             ["curl", "-sk", "--max-time", "8",
              "-H", f"Host: nonexistent-{self.target}",
              f"https://{ip}"],
             timeout=12,
         )
-        baseline_len = len(baseline) if baseline else 0
+        if rc_base != 0 or baseline is None:
+            logger.debug("  Vhost baseline failed; skipping vhost discovery")
+            return
+        baseline_len = len(baseline)
 
         for prefix in vhost_prefixes:
             vhost = f"{prefix}.{self.target}"
@@ -234,25 +236,29 @@ class ReconModule:
         out_file = f"{self.dirs['recon']}/favicon_hashes.txt"
         results = []
 
+        import subprocess as _sp, base64
         for base in hosts:
             for path in ["/favicon.ico", "/assets/favicon.ico"]:
-                rc, body, _ = run(
-                    ["curl", "-sL", "--max-time", "10", "--output", "-", f"{base}{path}"],
-                    timeout=15,
-                )
-                if rc != 0 or not body or len(body) < 100:
+                try:
+                    proc = _sp.run(
+                        ["curl", "-sL", "--max-time", "10", "--output", "-", f"{base}{path}"],
+                        capture_output=True, timeout=15,
+                    )
+                except Exception:
+                    continue
+                body = proc.stdout
+                if not body or len(body) < 100:
                     continue
                 try:
-                    import base64
-                    b64 = base64.encodebytes(body.encode("latin-1"))
+                    b64 = base64.encodebytes(body)
                     h = self._mmh3_hash(b64)
                     results.append(f"{base}: {h}")
                     for hr in self.host_records:
                         if base.endswith(hr.domain) or hr.domain in base:
                             hr.technologies.append(f"favicon:{h}")
                     break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug(f"  favicon hash failed for {base}: {exc}")
 
         if results:
             write_lines(out_file, results)
@@ -329,10 +335,12 @@ class ReconModule:
         logger.info(f"  Google dorks: {len(dorks)} queries generated")
 
     def _deduplicate_subdomains(self) -> None:
+        target = self.target.lower()
+        suffix = f".{target}"
         unique = sorted({
             s.strip().lower()
             for s in self.subdomains
-            if s.strip() and self.target in s
+            if s.strip() and (s.strip().lower() == target or s.strip().lower().endswith(suffix))
         })
         self.subdomains = unique
         all_file = f"{self.dirs['subdomains']}/all_subdomains.txt"
@@ -447,9 +455,10 @@ class ReconModule:
             if "open" in line and not line.startswith("#"):
                 self.ports_raw.append(line.strip())
 
-        # Update main HostRecord if exists
-        if self.host_records:
-            self.host_records[0].open_ports = self.ports_raw
+        # Attach open-port list to every host record for the apex target
+        for hr in self.host_records:
+            if hr.domain == self.target:
+                hr.open_ports = self.ports_raw
 
     def _masscan(self) -> None:
         if not which("masscan"):

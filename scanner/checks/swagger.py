@@ -33,7 +33,7 @@ class SwaggerCheck(BaseCheck):
                 if rc != 0 or not out:
                     continue
                 first_line = out.splitlines()[0] if out.splitlines() else ""
-                if "200" not in first_line:
+                if self._status_code(first_line) != 200:
                     continue
 
                 ct = ""

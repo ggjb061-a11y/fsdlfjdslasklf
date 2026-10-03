@@ -26,6 +26,9 @@ def tools_status(names: list) -> dict:
 # ─── Subprocess runner ────────────────────────────────────────────────────────
 
 _PROXY: Optional[str] = None
+_AUTH_HEADERS: List[str] = []
+_COOKIE: Optional[str] = None
+_BASIC_AUTH: Optional[str] = None
 
 def set_proxy(proxy: Optional[str]) -> None:
     global _PROXY
@@ -33,6 +36,19 @@ def set_proxy(proxy: Optional[str]) -> None:
 
 def get_proxy() -> Optional[str]:
     return _PROXY
+
+def set_auth(headers: list = None, cookie: str = None,
+             bearer: str = None, basic: str = None) -> None:
+    """Register auth material to be injected into every curl call."""
+    global _AUTH_HEADERS, _COOKIE, _BASIC_AUTH
+    _AUTH_HEADERS = list(headers or [])
+    if bearer:
+        _AUTH_HEADERS.append(f"Authorization: Bearer {bearer}")
+    _COOKIE = cookie
+    _BASIC_AUTH = basic
+
+def get_auth() -> dict:
+    return {"headers": _AUTH_HEADERS, "cookie": _COOKIE, "basic": _BASIC_AUTH}
 
 def run(
     cmd: List[str],
@@ -47,8 +63,17 @@ def run(
     Writes stdout to output_file if provided.
     Never raises on tool-not-found or timeout – returns negative rc.
     """
-    if _PROXY and cmd and cmd[0] == "curl":
-        cmd = [cmd[0], "--proxy", _PROXY] + cmd[1:]
+    if cmd and cmd[0] == "curl":
+        prefix = [cmd[0]]
+        if _PROXY:
+            prefix += ["--proxy", _PROXY]
+        for hdr in _AUTH_HEADERS:
+            prefix += ["-H", hdr]
+        if _COOKIE:
+            prefix += ["-H", f"Cookie: {_COOKIE}"]
+        if _BASIC_AUTH:
+            prefix += ["-u", _BASIC_AUTH]
+        cmd = prefix + cmd[1:]
     try:
         env = None
         if _PROXY and cmd and cmd[0] not in ("curl",):

@@ -77,8 +77,9 @@ class MethodTester:
                 if methods:
                     self.allowed_methods[host] = methods
 
-                    # Flag dangerous methods
-                    dangerous_found = set(methods) & DANGEROUS
+                    # Flag dangerous methods except TRACE, which gets its own
+                    # XST-specific finding below.
+                    dangerous_found = (set(methods) & DANGEROUS) - {"TRACE"}
                     if dangerous_found:
                         sev = "high" if "PUT" in dangerous_found or "DELETE" in dangerous_found else "medium"
                         self.findings.append(Finding(

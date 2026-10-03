@@ -34,7 +34,7 @@ class Bypass403Check(BaseCheck):
             if not out or not out.splitlines():
                 continue
             first = out.splitlines()[0]
-            if "403" not in first:
+            if self._status_code(first) != 403:
                 continue
 
             for extra in self.BYPASS_HEADERS:
@@ -42,14 +42,14 @@ class Bypass403Check(BaseCheck):
                     ["curl", "-sI", "--max-time", "8"] + extra + [host],
                     timeout=12,
                 )
-                first = out.splitlines()[0] if out and out.splitlines() else ""
-                if "200" in first or "301" in first or "302" in first:
+                code = self._status_code(out.splitlines()[0] if out and out.splitlines() else "")
+                if code in (200, 301, 302):
                     hdr = extra[1] if len(extra) > 1 else ""
                     self.findings.append(Finding(
                         severity="medium",
                         title=f"403 Bypass via Header: {hdr.split(':')[0]}",
                         host=host,
-                        detail=f"Header {hdr} bypasses 403 on {host}",
+                        detail=f"Header {hdr} returns {code} where base returned 403",
                         source="403_bypass",
                         url=host,
                         evidence=hdr,
@@ -62,13 +62,13 @@ class Bypass403Check(BaseCheck):
                     ["curl", "-sI", "--max-time", "5", "--path-as-is", test_url],
                     timeout=8,
                 )
-                first = out.splitlines()[0] if out and out.splitlines() else ""
-                if "200" in first:
+                code = self._status_code(out.splitlines()[0] if out and out.splitlines() else "")
+                if code == 200:
                     self.findings.append(Finding(
                         severity="medium",
                         title=f"403 Bypass via Path: {suffix}",
                         host=host,
-                        detail=f"Path manipulation {suffix} bypasses 403",
+                        detail=f"Path manipulation {suffix} returns 200",
                         source="403_bypass",
                         url=test_url,
                     ))

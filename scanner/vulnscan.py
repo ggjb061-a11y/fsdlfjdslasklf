@@ -10,6 +10,8 @@ from .checks import (
     SwaggerCheck, GraphQLCheck, CRLFCheck,
     HostHeaderCheck, CloudMetadataCheck,
     SSRFCheck, XXECheck, SSTICheck, PathTraversalCheck,
+    SQLInjectionCheck, CommandInjectionCheck,
+    NoSQLInjectionCheck, JWTWeaknessCheck,
     NucleiScan, NiktoScan, DirBruteCheck,
     TakeoverCheck, Bypass403Check, OpenRedirectCheck,
 )
@@ -36,6 +38,10 @@ class VulnScanner:
         XXECheck,
         SSTICheck,
         PathTraversalCheck,
+        SQLInjectionCheck,
+        CommandInjectionCheck,
+        NoSQLInjectionCheck,
+        JWTWeaknessCheck,
         NucleiScan,
         NiktoScan,
         DirBruteCheck,
@@ -73,12 +79,18 @@ class VulnScanner:
 
         seen = set()
         unique = []
+        duplicates = 0
         for f in self.findings:
-            key = (f.title, f.host)
+            key = (f.title, f.host, f.url, f.evidence[:100])
             if key not in seen:
                 seen.add(key)
                 unique.append(f)
+            else:
+                duplicates += 1
         self.findings = unique
 
-        logger.info(f"  Vuln scan complete | {len(self.findings)} findings")
+        if duplicates:
+            logger.info(f"  Vuln scan complete | {len(self.findings)} findings ({duplicates} duplicates collapsed)")
+        else:
+            logger.info(f"  Vuln scan complete | {len(self.findings)} findings")
         return self.findings

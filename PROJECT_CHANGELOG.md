@@ -2,6 +2,107 @@
 
 Version numbers follow the project's own `scanner/__init__.py::__version__`.
 
+## 3.2.0 (2026-10-03) - Post-audit hardening
+
+Driven by findings from a multi-agent audit (6 dimensions, adversarial
+verification). Fixes correctness bugs introduced by the v3.0 refactor
+and closes high-impact feature gaps.
+
+### Critical bug fixes
+- **Nuclei results silently dropped** (`scanner/checks/nuclei_scan.py:49`):
+  `info.tags` from modern nuclei is a list, not a comma-string. Previous
+  code called `.split(",")` on a list → every nuclei finding discarded.
+  Now handles both list and string forms.
+- **SSL check never produced findings** (`scanner/checks/ssl_tls.py:32`):
+  testssl.sh JSON is a top-level list; code called `.get("findings")`
+  on it (list has no .get) → silent AttributeError. Now detects both
+  shapes. Also added `_parse_sslscan` and `_parse_openssl` so the two
+  fallback branches now emit findings.
+- **DirBruteCheck emitted no findings** (`scanner/checks/dirbrute.py`):
+  ran gobuster/ffuf/feroxbuster but never read their output. Now parses
+  all three formats and classifies hits (sensitive paths → high, admin/debug
+  → medium, other → info).
+- **ParamDiscovery._arjun output never parsed**: arjun JSON output is
+  now read and merged into `found_params`.
+- **ParamDiscovery._paramspider output never collected**: now accepts a
+  URLRecord in the fallback (previous code crashed) and reads the generated
+  text file.
+- **Status code substring match ("200" in first_line)**: `BaseCheck._status_code`
+  now parses the status line correctly. Used by Bypass403Check, SwaggerCheck,
+  passive CMS probe.
+- **autoscan.py log handler check**: `setup_logging` was called once;
+  every subsequent target's logs went to the first target's log file.
+  Now tracks and replaces the target-specific file handler per scan.
+- **--only PHASE skipped upstream dependencies**: running `--only vuln`
+  left `live_hosts` empty. Added `PHASE_DEPS` map; --only PHASE now runs
+  the dependency chain.
+- **--format flag was ignored**: `generate()` emitted all three formats
+  unconditionally. Now accepts a `formats` list; autoscan.py passes the
+  CLI value through.
+- **Resume mode did not mkdir directories**: added mkdir loop before
+  logging setup.
+- **Multi-target run had no exception boundary**: one bad target killed
+  the batch. Now wrapped per-target in try/except; KeyboardInterrupt
+  returns 130, other errors log and continue.
+- **crt.sh filter false-positive**: `.endswith(target)` matched
+  `evilexample.com` for `example.com`. Now requires the leading dot.
+- **Subdomain dedup substring match**: `target in s` similarly matched
+  unrelated siblings. Now requires exact match or `.target` suffix.
+- **Vhost discovery baseline failure trap**: a failed baseline request
+  silently set `baseline_len=0`, causing every vhost to be reported.
+  Now returns early if the baseline request fails.
+- **Favicon hash on text-decoded binary**: `subprocess.run(text=True)`
+  corrupted binary favicon bytes. Now uses raw `subprocess.run` with
+  `capture_output` to preserve binary data for the mmh3 hash.
+- **nmap open_ports attached only to first host record**: now attaches
+  to every host record whose domain matches the target.
+- **Open-redirect false positive on reflected URL**: anchor-matched
+  `evil-attacker.com` anywhere in Location header. Now requires
+  `Location:` to point directly at the attacker-controlled host.
+- **MethodTester duplicate TRACE finding**: TRACE caused both the
+  aggregate dangerous-methods finding and the XST finding to fire.
+  Now the aggregate excludes TRACE.
+- **VulnScanner finding dedup silently dropped distinct findings**:
+  the key was `(title, host)` only, collapsing findings on different
+  URLs. Now `(title, host, url, evidence[:100])`.
+
+### New vulnerability checks (4 added, 22 total)
+- **SQLInjectionCheck** - 6 payloads × 17 params × 18 DB-engine error
+  signatures (MySQL, PostgreSQL, Oracle, MSSQL, SQLite).
+- **CommandInjectionCheck** - 6 marker payloads (output-reflected)
+  and 4 time-based blind payloads across 17 params.
+- **NoSQLInjectionCheck** - MongoDB `$ne`/`$gt`/`$regex` operator payloads
+  against 7 common login endpoints; detects auth bypass via token response.
+- **JWTWeaknessCheck** - extracts JWT tokens from pages, detects
+  alg=none, HS256 weak-secret cracking against 19 common secrets,
+  flags kid-header path traversal.
+
+### Code quality
+- **Centralized `evil-attacker.com` canary** → `scanner/constants.py::ATTACKER_CANARY`.
+  Used by CORSCheck, OpenRedirectCheck, HostHeaderCheck.
+- **Dead imports removed**: `hashlib`, `struct` from recon.py.
+- **`BaseCheck._status_code` helper**: safer status-line parsing.
+- **Auth support in `utils.run`**: `--cookie`, `--header`, `--bearer`,
+  `--basic-auth` CLI flags; auth material injected into every curl call.
+- **`--fail-on {critical,high,medium,low}` severity gate**: exits 2 on
+  threshold crossed, suitable for CI pipelines.
+- **`--config FILE` flag** (reserved; honored by future config loader).
+
+### Tests
+69 passing (up from 57). New coverage:
+- SQLi/CMDi/NoSQLi check static data integrity
+- JWT regex + weak-secret recovery + random-secret rejection
+- Status-code parser with regression test for the "200 in substring" bug
+- Auth helper setters
+- Constants centralization
+
+### Files Added
+- `scanner/constants.py`
+- `scanner/checks/sql_injection.py`
+- `scanner/checks/cmd_injection.py`
+- `scanner/checks/nosql_injection.py`
+- `scanner/checks/jwt_weakness.py`
+
 ## 3.1.0 (2026-10-03)
 
 ### Added

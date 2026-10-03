@@ -196,7 +196,13 @@ class PassiveModule:
                     if rc != 0 or not headers:
                         continue
                     first_line = headers.splitlines()[0] if headers.splitlines() else ""
-                    if "200" in first_line or "301" in first_line or "302" in first_line:
+                    parts = first_line.split()
+                    code = 0
+                    for p in parts[1:3]:
+                        if p.isdigit():
+                            code = int(p)
+                            break
+                    if code in (200, 301, 302):
                         if base not in self.cms_info:
                             self.cms_info[base] = cms
                         self.findings.append(Finding(

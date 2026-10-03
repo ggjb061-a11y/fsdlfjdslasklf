@@ -28,10 +28,11 @@ class SSLCheck(BaseCheck):
             if p.exists():
                 try:
                     data = json.loads(p.read_text(errors="replace"))
-                    for entry in data.get("findings", []):
+                    entries = data if isinstance(data, list) else data.get("findings", [])
+                    for entry in entries:
                         sev_map = {"CRITICAL": "critical", "HIGH": "high",
                                    "MEDIUM": "medium", "LOW": "low",
-                                   "INFO": "info", "OK": "info", "NOT ok": "medium"}
+                                   "INFO": "info", "OK": "info", "NOT OK": "medium"}
                         raw_sev = entry.get("severity", "INFO")
                         sev = sev_map.get(raw_sev.upper(), "info")
                         if sev in ("medium", "high", "critical"):
@@ -42,12 +43,14 @@ class SSLCheck(BaseCheck):
                                 detail=entry.get("finding", ""),
                                 source="testssl",
                             ))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self.log.warning(f"  testssl.json parse failed: {exc}")
 
         elif which("sslscan"):
+            txt_path = f"{out_dir}/sslscan.txt"
             run(["sslscan", "--xml", f"{out_dir}/sslscan.xml", self.target],
-                output_file=f"{out_dir}/sslscan.txt", timeout=120)
+                output_file=txt_path, timeout=120)
+            self._parse_sslscan(txt_path)
 
         elif which("openssl"):
             rc, out, err = run(
@@ -55,6 +58,54 @@ class SSLCheck(BaseCheck):
                  "-servername", self.target],
                 stdin_data="", timeout=15,
             )
-            Path(f"{out_dir}/openssl.txt").write_text(out + err)
+            text = (out or "") + (err or "")
+            Path(f"{out_dir}/openssl.txt").write_text(text)
+            self._parse_openssl(text)
 
         return self.findings
+
+    def _parse_sslscan(self, path: str) -> None:
+        p = Path(path)
+        if not p.exists():
+            return
+        content = p.read_text(errors="replace")
+        if "SSLv2" in content and "accepted" in content.lower():
+            self.findings.append(Finding(
+                severity="high", title="SSL/TLS: SSLv2 Accepted",
+                host=self.target, detail="SSLv2 protocol is accepted - critically weak",
+                source="sslscan",
+            ))
+        if "SSLv3" in content and "accepted" in content.lower():
+            self.findings.append(Finding(
+                severity="high", title="SSL/TLS: SSLv3 Accepted (POODLE)",
+                host=self.target, detail="SSLv3 protocol accepted - POODLE attack",
+                source="sslscan",
+            ))
+        if "TLSv1.0" in content and "enabled" in content.lower():
+            self.findings.append(Finding(
+                severity="medium", title="SSL/TLS: TLSv1.0 Enabled",
+                host=self.target, detail="Deprecated TLSv1.0 is enabled",
+                source="sslscan",
+            ))
+
+    def _parse_openssl(self, text: str) -> None:
+        import re
+        m = re.search(r"notAfter\s*=\s*(.+)", text)
+        if m:
+            self.findings.append(Finding(
+                severity="info", title="SSL/TLS: Certificate expiry info",
+                host=self.target, detail=f"Certificate expires: {m.group(1).strip()}",
+                source="openssl",
+            ))
+        if "self signed" in text.lower() or "self-signed" in text.lower():
+            self.findings.append(Finding(
+                severity="medium", title="SSL/TLS: Self-Signed Certificate",
+                host=self.target, detail="Server presents self-signed certificate",
+                source="openssl",
+            ))
+        if re.search(r"Protocol\s*:\s*SSLv[23]", text):
+            self.findings.append(Finding(
+                severity="high", title="SSL/TLS: Weak Protocol Negotiated",
+                host=self.target, detail="openssl negotiated SSLv2/SSLv3",
+                source="openssl",
+            ))

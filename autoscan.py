@@ -19,7 +19,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from scanner.utils import create_dirs, tools_status, run, set_proxy
+from scanner.utils import create_dirs, tools_status, run, set_proxy, set_auth
 from scanner.models import ScanResult
 from scanner.recon import ReconModule
 from scanner.crawler import CrawlerModule
@@ -54,19 +54,37 @@ ALL_TOOLS = [
 ]
 
 
+_LOGGING_CONFIGURED = False
+
+
 def setup_logging(verbose: bool, log_file: str) -> None:
+    """Attach stdout + file handler for THIS run's log file.
+
+    Called once per target. First call also sets the global level and stdout
+    stream. Subsequent calls only replace the file handler so each target
+    writes to its own scan.log.
+    """
+    global _LOGGING_CONFIGURED
     fmt = "%(asctime)s [%(levelname)-5s] %(message)s"
     datefmt = "%H:%M:%S"
-    handlers = [
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(log_file),
-    ]
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
-        format=fmt,
-        datefmt=datefmt,
-        handlers=handlers,
-    )
+    formatter = logging.Formatter(fmt, datefmt=datefmt)
+
+    root = logging.getLogger()
+    if not _LOGGING_CONFIGURED:
+        root.setLevel(logging.DEBUG if verbose else logging.INFO)
+        sh = logging.StreamHandler(sys.stdout)
+        sh.setFormatter(formatter)
+        root.addHandler(sh)
+        _LOGGING_CONFIGURED = True
+
+    for h in list(root.handlers):
+        if isinstance(h, logging.FileHandler) and getattr(h, "_autoscan_target_log", False):
+            root.removeHandler(h)
+            h.close()
+    fh = logging.FileHandler(log_file)
+    fh.setFormatter(formatter)
+    fh._autoscan_target_log = True
+    root.addHandler(fh)
 
 
 def cli() -> argparse.Namespace:
@@ -100,6 +118,14 @@ def cli() -> argparse.Namespace:
     p.add_argument("--wordlist", help="Custom wordlist for directory brute-force")
     p.add_argument("--format", choices=["all", "html", "json", "markdown"], default="all",
                    help="Output format(s) (default: all)")
+    p.add_argument("--fail-on", choices=["critical", "high", "medium", "low"],
+                   help="Exit with non-zero code if findings at or above this severity exist")
+    p.add_argument("--cookie", help="Cookie header value for authenticated scans")
+    p.add_argument("--header", action="append", default=[],
+                   help="Add custom header to every request (format: 'Name: value'); may be repeated")
+    p.add_argument("--bearer", help="Bearer token for Authorization header")
+    p.add_argument("--basic-auth", help="HTTP basic auth as user:password")
+    p.add_argument("--config", help="YAML/TOML config file with scan profile")
     p.add_argument("--webhook", help="Webhook URL for completion notification")
     p.add_argument("-v", "--verbose", action="store_true")
     p.add_argument("--version", action="version", version=f"AutoVulnScan {VERSION}")
@@ -184,13 +210,10 @@ def scan_target(target: str, args: argparse.Namespace, resume_dir: str = None) -
     else:
         dirs = create_dirs(args.output, target)
 
+    for d in dirs.values():
+        Path(d).mkdir(parents=True, exist_ok=True)
     log_file = f"{dirs['base']}/scan.log"
-    Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-
-    if not logging.getLogger("autoscan").handlers:
-        setup_logging(args.verbose, log_file)
-    else:
-        logging.getLogger("autoscan").addHandler(logging.FileHandler(log_file))
+    setup_logging(args.verbose, log_file)
 
     log = logging.getLogger("autoscan")
     cm = CheckpointManager(dirs["base"])
@@ -214,9 +237,19 @@ def scan_target(target: str, args: argparse.Namespace, resume_dir: str = None) -
     cm.restore_result(result)
     quick = args.scope == "quick"
 
+    PHASE_DEPS = {
+        "recon":   set(),
+        "passive": {"recon"},
+        "crawl":   {"recon"},
+        "js":      {"recon", "crawl"},
+        "params":  {"recon", "crawl"},
+        "methods": {"recon"},
+        "vuln":    {"recon"},
+    }
+
     def should(name: str) -> bool:
         if args.only:
-            return args.only == name
+            return name in (PHASE_DEPS.get(args.only, set()) | {args.only})
         if getattr(args, f"skip_{name}", False):
             return False
         if quick and name in ("crawl", "js", "params", "methods", "vuln"):
@@ -319,7 +352,8 @@ def scan_target(target: str, args: argparse.Namespace, resume_dir: str = None) -
         cm.mark_done("vuln", {"findings": [vars(f) for f in vuln_findings]})
 
     phase_banner(log, "PHASE 8 - GENERATING REPORT")
-    report_path = generate(result)
+    formats = ["html", "json", "markdown"] if args.format == "all" else [args.format]
+    report_path = generate(result, formats=formats)
     counts = result.count_by_severity()
 
     end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -417,6 +451,12 @@ def main() -> None:
 
     if args.proxy:
         set_proxy(args.proxy)
+    set_auth(
+        headers=args.header,
+        cookie=args.cookie,
+        bearer=args.bearer,
+        basic=args.basic_auth,
+    )
 
     start = time.time()
 
@@ -426,7 +466,15 @@ def main() -> None:
             print(f"  TARGET {i}/{len(targets)}: {target}")
             print(f"{'#'*60}")
 
-        scan_target(target, args)
+        try:
+            scan_target(target, args)
+        except KeyboardInterrupt:
+            print(f"\n  [!] Interrupted during {target}; use --resume to continue.")
+            sys.exit(130)
+        except Exception as exc:
+            log = logging.getLogger("autoscan")
+            log.error(f"  [!] Target {target} failed: {exc}", exc_info=args.verbose)
+            print(f"  [!] Target {target} failed, continuing with next: {exc}")
 
         if args.rate_limit > 0 and i < len(targets):
             time.sleep(args.rate_limit)
@@ -436,6 +484,37 @@ def main() -> None:
         print(f"\n{'='*60}")
         print(f"  ALL {len(targets)} TARGETS COMPLETE in {elapsed:.0f}s")
         print(f"{'='*60}\n")
+
+    if args.fail_on:
+        _severity_gate(args.fail_on, args.output, targets)
+
+
+def _severity_gate(threshold: str, output_dir: str, targets: list) -> None:
+    """Exit non-zero if any target produced a finding at or above the threshold."""
+    order = ["critical", "high", "medium", "low", "info"]
+    threshold_idx = order.index(threshold)
+    worst_found = None
+    worst_idx = len(order)
+    scanned_root = Path(output_dir)
+    for target in targets:
+        safe = target.replace("/", "_")
+        target_dir = scanned_root / safe
+        if not target_dir.exists():
+            continue
+        for summary in target_dir.glob("*/06_reports/summary.json"):
+            try:
+                data = json.loads(summary.read_text())
+                for sev, count in data.get("severity_counts", {}).items():
+                    if count > 0 and sev in order:
+                        idx = order.index(sev)
+                        if idx <= threshold_idx and idx < worst_idx:
+                            worst_idx = idx
+                            worst_found = sev
+            except Exception:
+                continue
+    if worst_found:
+        print(f"\n  [!] --fail-on {threshold}: found {worst_found} finding(s); exiting 2.")
+        sys.exit(2)
 
 
 if __name__ == "__main__":

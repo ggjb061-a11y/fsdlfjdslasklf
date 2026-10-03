@@ -11,6 +11,10 @@ from .ssrf import SSRFCheck
 from .xxe import XXECheck
 from .ssti import SSTICheck
 from .path_traversal import PathTraversalCheck
+from .sql_injection import SQLInjectionCheck
+from .cmd_injection import CommandInjectionCheck
+from .nosql_injection import NoSQLInjectionCheck
+from .jwt_weakness import JWTWeaknessCheck
 from .nuclei_scan import NucleiScan
 from .nikto_scan import NiktoScan
 from .dirbrute import DirBruteCheck
@@ -31,6 +35,10 @@ ALL_CHECKS = [
     XXECheck,
     SSTICheck,
     PathTraversalCheck,
+    SQLInjectionCheck,
+    CommandInjectionCheck,
+    NoSQLInjectionCheck,
+    JWTWeaknessCheck,
     NucleiScan,
     NiktoScan,
     DirBruteCheck,

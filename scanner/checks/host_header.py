@@ -2,6 +2,7 @@
 from .base import BaseCheck
 from ..models import Finding
 from ..utils import run
+from ..constants import ATTACKER_CANARY
 
 
 class HostHeaderCheck(BaseCheck):
@@ -9,7 +10,7 @@ class HostHeaderCheck(BaseCheck):
     description = "Test for Host header manipulation vulnerabilities"
 
     def execute(self) -> list[Finding]:
-        evil_host = "evil-attacker.com"
+        evil_host = ATTACKER_CANARY
 
         for base in self._hosts():
             rc, out, _ = run(

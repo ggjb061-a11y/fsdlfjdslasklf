@@ -2,6 +2,7 @@
 from .base import BaseCheck
 from ..models import Finding
 from ..utils import run
+from ..constants import ATTACKER_CANARY
 
 
 class CORSCheck(BaseCheck):
@@ -12,14 +13,14 @@ class CORSCheck(BaseCheck):
         for host in self._hosts(10):
             rc, out, _ = run(
                 ["curl", "-sI", "--max-time", "10",
-                 "-H", "Origin: https://evil-attacker.com", host],
+                 "-H", f"Origin: https://{ATTACKER_CANARY}", host],
                 timeout=15,
             )
             if rc != 0 or not out:
                 continue
             out_lower = out.lower()
 
-            if "access-control-allow-origin: https://evil-attacker.com" in out_lower:
+            if f"access-control-allow-origin: https://{ATTACKER_CANARY}" in out_lower:
                 cred = "access-control-allow-credentials: true" in out_lower
                 sev = "critical" if cred else "high"
                 self.findings.append(Finding(
@@ -45,12 +46,13 @@ class CORSCheck(BaseCheck):
                         url=host,
                     ))
 
+            suffix_origin = f"https://{self.target}.{ATTACKER_CANARY}"
             rc2, out2, _ = run(
                 ["curl", "-sI", "--max-time", "10",
-                 "-H", f"Origin: https://{self.target}.evil.com", host],
+                 "-H", f"Origin: {suffix_origin}", host],
                 timeout=15,
             )
-            if out2 and f"access-control-allow-origin: https://{self.target}.evil.com" in out2.lower():
+            if out2 and f"access-control-allow-origin: {suffix_origin}" in out2.lower():
                 self.findings.append(Finding(
                     severity="high",
                     title="CORS Origin Suffix Bypass",

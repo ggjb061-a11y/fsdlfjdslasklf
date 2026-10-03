@@ -362,8 +362,16 @@ function T(id){document.getElementById(id).classList.toggle('closed')}
 </html>"""
 
 
-def generate(result) -> str:
-    """Render HTML + JSON reports. Returns HTML report path."""
+def generate(result, formats: list = None) -> str:
+    """Render reports in requested formats.
+
+    formats: list of 'html', 'json', 'markdown'. None/empty => all three.
+    Returns the HTML report path if HTML was emitted, otherwise the first
+    output path emitted.
+    """
+    if not formats:
+        formats = ["html", "json", "markdown"]
+
     counts = result.count_by_severity()
     env = Environment(loader=BaseLoader(), autoescape=True)
     tmpl = env.from_string(REPORT_HTML)
@@ -390,12 +398,19 @@ def generate(result) -> str:
         google_dorks=getattr(result, "google_dorks", []),
     )
 
-    html_path = f"{result.base_dir}/06_reports/report.html"
-    Path(html_path).write_text(html)
-    logger.info(f"  HTML report: {html_path}")
-
+    first_path = None
     from .output import generate_json, generate_markdown
-    generate_json(result)
-    generate_markdown(result)
 
-    return html_path
+    if "html" in formats:
+        html_path = f"{result.base_dir}/06_reports/report.html"
+        Path(html_path).write_text(html)
+        logger.info(f"  HTML report: {html_path}")
+        first_path = first_path or html_path
+    if "json" in formats:
+        json_path = generate_json(result)
+        first_path = first_path or json_path
+    if "markdown" in formats:
+        md_path = generate_markdown(result)
+        first_path = first_path or md_path
+
+    return first_path or ""

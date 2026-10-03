@@ -29,6 +29,22 @@ class BaseCheck:
         write_lines(tf, hosts)
         return tf
 
+    @staticmethod
+    def _status_code(status_line: str) -> int:
+        """Extract numeric HTTP status from a 'HTTP/1.1 302 Found' line.
+
+        Returns 0 if not parseable. Guards against the common bug of
+        checking `"200" in status_line` which spuriously matches lines
+        with 200X-numbered dates or servers.
+        """
+        if not status_line:
+            return 0
+        parts = status_line.split()
+        for part in parts[1:3]:
+            if part.isdigit() and 100 <= int(part) < 600:
+                return int(part)
+        return 0
+
     def execute(self) -> list[Finding]:
         raise NotImplementedError
 

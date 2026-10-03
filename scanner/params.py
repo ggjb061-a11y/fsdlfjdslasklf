@@ -39,6 +39,7 @@ class ParamDiscovery:
         """Use arjun for parameter discovery if available."""
         if not which("arjun"):
             return
+        import json as _json
         targets = self.live_hosts[:5]
         for i, host in enumerate(targets):
             out = f"{self.dirs['urls']}/arjun_{i}.json"
@@ -47,19 +48,63 @@ class ParamDiscovery:
                  "--stable", "-m", "GET"],
                 timeout=300,
             )
+            p = Path(out)
+            if not p.exists():
+                continue
+            try:
+                data = _json.loads(p.read_text(errors="replace"))
+            except Exception as exc:
+                logger.debug(f"  arjun output parse failed: {exc}")
+                continue
+            if isinstance(data, dict):
+                for url, info in data.items():
+                    params = []
+                    if isinstance(info, dict):
+                        params = info.get("params", [])
+                    elif isinstance(info, list):
+                        params = info
+                    if params:
+                        existing = set(self.found_params.get(url, []))
+                        existing.update(params)
+                        self.found_params[url] = sorted(existing)
+            elif isinstance(data, list):
+                for entry in data:
+                    url = entry.get("url", host) if isinstance(entry, dict) else host
+                    params = entry.get("params", []) if isinstance(entry, dict) else []
+                    if params:
+                        existing = set(self.found_params.get(url, []))
+                        existing.update(params)
+                        self.found_params[url] = sorted(existing)
 
     def _paramspider(self) -> None:
-        """Use paramspider if available."""
+        """Use paramspider if available. Output goes under dirs['urls']/paramspider."""
         if not which("paramspider"):
             return
-        out_dir = f"{self.dirs['urls']}/paramspider"
-        Path(out_dir).mkdir(exist_ok=True)
-        # paramspider outputs to current dir by default
-        run(
-            ["paramspider", "-d", self.live_hosts[0].split("/")[2] if self.live_hosts
-             else self.urls[0] if self.urls else ""],
+        from .utils import read_lines
+        out_dir = Path(f"{self.dirs['urls']}/paramspider")
+        out_dir.mkdir(exist_ok=True)
+        if self.live_hosts:
+            host_str = self.live_hosts[0].split("/")[2] if "://" in self.live_hosts[0] else self.live_hosts[0]
+        elif self.urls:
+            first = self.urls[0]
+            url = first.url if hasattr(first, "url") else str(first)
+            host_str = url.split("/")[2] if "://" in url else url
+        else:
+            return
+        rc, _, _ = run(
+            ["paramspider", "-d", host_str, "-o", str(out_dir / f"{host_str}.txt")],
             timeout=120,
+            cwd=str(out_dir),
         )
+        for p in out_dir.glob("*.txt"):
+            for line in read_lines(str(p)):
+                if "?" in line and "=" in line:
+                    base, qs = line.split("?", 1)
+                    params = sorted({seg.split("=")[0] for seg in qs.split("&") if seg})
+                    if params:
+                        existing = set(self.found_params.get(base, []))
+                        existing.update(params)
+                        self.found_params[base] = sorted(existing)
 
     def _builtin_probe(self) -> None:
         """Probe common parameters on endpoints to find reflected ones."""
