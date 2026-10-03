@@ -9,6 +9,7 @@ from .checks import (
     HeadersCheck, CORSCheck, SSLCheck,
     SwaggerCheck, GraphQLCheck, CRLFCheck,
     HostHeaderCheck, CloudMetadataCheck,
+    SSRFCheck, XXECheck, SSTICheck, PathTraversalCheck,
     NucleiScan, NiktoScan, DirBruteCheck,
     TakeoverCheck, Bypass403Check, OpenRedirectCheck,
 )
@@ -31,6 +32,10 @@ class VulnScanner:
         CRLFCheck,
         HostHeaderCheck,
         CloudMetadataCheck,
+        SSRFCheck,
+        XXECheck,
+        SSTICheck,
+        PathTraversalCheck,
         NucleiScan,
         NiktoScan,
         DirBruteCheck,

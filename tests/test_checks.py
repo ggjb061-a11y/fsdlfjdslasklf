@@ -5,6 +5,7 @@ import unittest
 from scanner.checks import (
     HeadersCheck, CORSCheck, SwaggerCheck, GraphQLCheck,
     CRLFCheck, HostHeaderCheck, CloudMetadataCheck,
+    SSRFCheck, XXECheck, SSTICheck, PathTraversalCheck,
     Bypass403Check, OpenRedirectCheck, DirBruteCheck,
     ALL_CHECKS,
 )
@@ -14,7 +15,7 @@ from scanner.utils import create_dirs
 
 class TestChecksRegistry(unittest.TestCase):
     def test_all_checks_registered(self):
-        self.assertGreaterEqual(len(ALL_CHECKS), 14)
+        self.assertGreaterEqual(len(ALL_CHECKS), 18)
         for cls in ALL_CHECKS:
             self.assertTrue(issubclass(cls, BaseCheck),
                             f"{cls.__name__} must subclass BaseCheck")
@@ -62,6 +63,25 @@ class TestCheckStaticData(unittest.TestCase):
     def test_headers_required(self):
         self.assertIn("strict-transport-security", HeadersCheck.REQUIRED)
         self.assertIn("content-security-policy", HeadersCheck.REQUIRED)
+
+    def test_ssrf_params(self):
+        self.assertIn("url", SSRFCheck.SSRF_PARAMS)
+        self.assertGreater(len(SSRFCheck.PROBES), 2)
+
+    def test_xxe_payloads(self):
+        self.assertIn("ENTITY xxe SYSTEM", XXECheck.XXE_PAYLOAD)
+
+    def test_ssti_payloads(self):
+        self.assertGreater(len(SSTICheck.PAYLOADS), 3)
+        for engine, payload, expected in SSTICheck.PAYLOADS:
+            self.assertTrue(engine)
+            self.assertTrue(payload)
+            self.assertTrue(expected)
+
+    def test_path_traversal(self):
+        self.assertIn("file", PathTraversalCheck.PARAMS)
+        self.assertGreater(len(PathTraversalCheck.PAYLOADS), 4)
+        self.assertIn("root:x:0:0", PathTraversalCheck.INDICATORS)
 
 
 class TestBaseCheck(unittest.TestCase):

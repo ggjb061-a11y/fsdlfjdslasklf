@@ -7,6 +7,10 @@ from .graphql import GraphQLCheck
 from .crlf import CRLFCheck
 from .host_header import HostHeaderCheck
 from .cloud_meta import CloudMetadataCheck
+from .ssrf import SSRFCheck
+from .xxe import XXECheck
+from .ssti import SSTICheck
+from .path_traversal import PathTraversalCheck
 from .nuclei_scan import NucleiScan
 from .nikto_scan import NiktoScan
 from .dirbrute import DirBruteCheck
@@ -23,6 +27,10 @@ ALL_CHECKS = [
     CRLFCheck,
     HostHeaderCheck,
     CloudMetadataCheck,
+    SSRFCheck,
+    XXECheck,
+    SSTICheck,
+    PathTraversalCheck,
     NucleiScan,
     NiktoScan,
     DirBruteCheck,
