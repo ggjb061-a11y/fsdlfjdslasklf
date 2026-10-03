@@ -148,6 +148,123 @@ def phase_banner(log, title: str) -> None:
     log.info(bar)
 
 
+SEV_ICON = {
+    "critical": "[CRIT]",
+    "high":     "[HIGH]",
+    "medium":   "[MED ]",
+    "low":      "[LOW ]",
+    "info":     "[INFO]",
+}
+
+
+def _print_summary(target: str, result, counts: dict, dirs: dict,
+                   report_path: str, end_time: str) -> None:
+    """Pretty, organized end-of-scan summary printed to the terminal.
+
+    Sections:
+      1. Scan stats (subdomains, hosts, URLs, secrets, emails, params)
+      2. Severity counts
+      3. Findings grouped by severity (critical/high/medium shown in full,
+         low/info summarized by source)
+      4. Highlighted sections: JS secrets, sensitive files, dual-confirmed SQLi
+      5. Output paths
+    """
+    bar = "=" * 72
+    sub_bar = "-" * 72
+
+    print(f"\n{bar}")
+    print(f"  SCAN COMPLETE - {target}")
+    print(f"  Finished at: {end_time}")
+    print(bar)
+
+    # 1. Scan stats
+    emails = getattr(result, "emails", [])
+    print(f"  Subdomains     : {len(result.subdomains):>5}")
+    print(f"  Live hosts     : {len(result.live_hosts):>5}")
+    print(f"  URLs collected : {len(result.urls):>5}")
+    print(f"  JS secrets     : {len(result.js_secrets):>5}")
+    print(f"  Emails         : {len(emails):>5}")
+    print(f"  Params found   : {sum(len(v) for v in result.found_params.values()):>5}")
+    print(sub_bar)
+
+    # 2. Severity counts
+    print(f"  Critical: {counts['critical']:>4}   |   High: {counts['high']:>4}   |   "
+          f"Medium: {counts['medium']:>4}   |   Low: {counts['low']:>4}   |   Info: {counts['info']:>4}")
+    print(f"  Total findings: {len(result.findings)}")
+    print(bar)
+
+    # 3. Findings by severity
+    findings = result.sorted_findings()
+    if not findings:
+        print("  No findings reported.")
+    else:
+        for sev in ("critical", "high", "medium"):
+            sev_items = [f for f in findings if f.severity.lower() == sev]
+            if not sev_items:
+                continue
+            print(f"\n  {SEV_ICON[sev]} {sev.upper()} ({len(sev_items)})")
+            print(f"  {sub_bar}")
+            for i, f in enumerate(sev_items, 1):
+                print(f"  {i:>3}. {f.title}")
+                print(f"       Host  : {f.host[:85]}")
+                if f.url and f.url != f.host:
+                    print(f"       URL   : {f.url[:85]}")
+                print(f"       Source: {f.source}")
+                if f.tags:
+                    tags_shown = ", ".join(f.tags[:6])
+                    print(f"       Tags  : {tags_shown}")
+                detail_short = (f.detail or "").replace("\n", " ")[:120]
+                if detail_short:
+                    print(f"       Detail: {detail_short}")
+
+        for sev in ("low", "info"):
+            sev_items = [f for f in findings if f.severity.lower() == sev]
+            if not sev_items:
+                continue
+            by_source: dict[str, int] = {}
+            for f in sev_items:
+                by_source[f.source] = by_source.get(f.source, 0) + 1
+            print(f"\n  {SEV_ICON[sev]} {sev.upper()} ({len(sev_items)}) - grouped by source:")
+            for src, n in sorted(by_source.items(), key=lambda x: -x[1]):
+                print(f"       {src:<20} {n:>4}")
+
+    # 4. Highlighted sections
+    highlights = []
+    if result.js_secrets:
+        highlights.append(f"  * {len(result.js_secrets)} JS secrets found "
+                          f"(see 03_js_analysis/secrets/)")
+    sensitive_urls = [u for u in result.urls if u.is_sensitive_file]
+    if sensitive_urls:
+        highlights.append(f"  * {len(sensitive_urls)} sensitive files exposed "
+                          f"(see 02_urls/sensitive_files.txt)")
+    dual = [f for f in findings if "DUAL-CONFIRMED" in f.title]
+    if dual:
+        highlights.append(f"  * {len(dual)} SQLi DUAL-CONFIRMED (built-in + sqlmap)")
+    takeovers = [f for f in findings if f.source == "takeover"
+                 and "tool-only" not in f.tags]
+    if takeovers:
+        highlights.append(f"  * {len(takeovers)} subdomain takeover(s) confirmed")
+
+    if highlights:
+        print(f"\n{bar}")
+        print("  HIGHLIGHTS")
+        print(sub_bar)
+        for line in highlights:
+            print(line)
+
+    # 5. Output paths
+    print(f"\n{bar}")
+    print("  REPORTS")
+    print(sub_bar)
+    print(f"  HTML     : {dirs['reports']}/report.html")
+    print(f"  JSON     : {dirs['reports']}/summary.json")
+    print(f"  Markdown : {dirs['reports']}/report.md")
+    print(f"  SARIF    : {dirs['reports']}/report.sarif")
+    print(f"  CSV      : {dirs['reports']}/findings.csv")
+    print(f"  All data : {dirs['base']}/")
+    print(f"{bar}\n")
+
+
 def send_webhook(url: str, target: str, counts: dict, report_path: str) -> None:
     """Send scan completion notification via webhook (Slack/Discord compatible)."""
     try:
@@ -354,28 +471,7 @@ def scan_target(target: str, args: argparse.Namespace, resume_dir: str = None) -
     counts = result.count_by_severity()
 
     end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"\n{'='*60}")
-    print(f"  SCAN COMPLETE - {target}")
-    print(f"{'='*60}")
-    print(f"  Subdomains     : {len(result.subdomains)}")
-    print(f"  Live hosts     : {len(result.live_hosts)}")
-    print(f"  URLs collected : {len(result.urls)}")
-    print(f"  JS secrets     : {len(result.js_secrets)}")
-    print(f"  Emails         : {len(getattr(result, 'emails', []))}")
-    print(f"  --------------------------------------")
-    print(f"  Critical       : {counts['critical']}")
-    print(f"  High           : {counts['high']}")
-    print(f"  Medium         : {counts['medium']}")
-    print(f"  Low            : {counts['low']}")
-    print(f"  Info           : {counts['info']}")
-    print(f"  Total findings : {len(result.findings)}")
-    print(f"{'='*60}")
-    print(f"  HTML Report    : {report_path}")
-    print(f"  JSON Report    : {dirs['reports']}/summary.json")
-    print(f"  Markdown Report: {dirs['reports']}/report.md")
-    print(f"  All outputs    : {dirs['base']}/")
-    print(f"  Finished at    : {end_time}")
-    print(f"{'='*60}\n")
+    _print_summary(target, result, counts, dirs, report_path, end_time)
 
     if args.webhook:
         send_webhook(args.webhook, target, counts, report_path)
