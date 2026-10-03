@@ -136,6 +136,61 @@ class ReconModule:
         write_lines(out, sorted(subs))
         logger.info(f"  crt.sh: {len(subs)} subdomains")
 
+    def _recon_sources_bundle(self) -> None:
+        """Query 8 free passive-DNS / CT / scraping sources in parallel."""
+        from .recon_sources import ALL_SOURCES
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        with ThreadPoolExecutor(max_workers=min(self.threads, 8)) as ex:
+            futures = {ex.submit(fn, self.target): name
+                       for name, fn in ALL_SOURCES}
+            for fut in as_completed(futures):
+                name = futures[fut]
+                try:
+                    found = fut.result()
+                except Exception as exc:
+                    logger.debug(f"  recon source {name}: {exc}")
+                    continue
+                if found:
+                    logger.info(f"  {name}: {len(found)} subdomains")
+                    self.subdomains += list(found)
+                    safe = name.lower().replace(" ", "_").replace(".", "_")
+                    write_lines(
+                        f"{self.dirs['subdomains']}/source_{safe}.txt",
+                        sorted(found),
+                    )
+
+    def _tls_san_enum(self) -> None:
+        """Pull SubjectAltName from the apex host's TLS cert."""
+        from .recon_sources import fetch_tls_san
+        try:
+            found = fetch_tls_san(self.target)
+        except Exception as exc:
+            logger.debug(f"  TLS SAN enum: {exc}")
+            return
+        if found:
+            self.subdomains += list(found)
+            write_lines(f"{self.dirs['subdomains']}/tls_san.txt",
+                        sorted(found))
+            logger.info(f"  TLS SAN: {len(found)} subdomains")
+
+    def _js_subdomain_mining(self) -> None:
+        """Extract <target>-ending hostnames from downloaded JS files."""
+        from .recon_sources import fetch_js_mining
+        js_dir = self.dirs.get("js_files")
+        if not js_dir:
+            return
+        try:
+            found = fetch_js_mining(self.target, js_dir=js_dir)
+        except Exception as exc:
+            logger.debug(f"  JS mining: {exc}")
+            return
+        if found:
+            self.subdomains += list(found)
+            write_lines(f"{self.dirs['subdomains']}/js_mined.txt",
+                        sorted(found))
+            logger.info(f"  JS mining: {len(found)} subdomains")
+
     def _reverse_ip(self) -> None:
         """Resolve target IP and look for other domains sharing the same IP."""
         ip = resolve_ip(self.target)
@@ -503,12 +558,15 @@ class ReconModule:
             ("Findomain",              self._findomain),
             ("Sublist3r",              self._sublist3r),
             ("crt.sh (CT logs)",       self._crtsh),
+            ("Passive DNS bundle (8 sources)", self._recon_sources_bundle),
+            ("TLS SAN enumeration",    self._tls_san_enum),
             ("Reverse IP lookup",      self._reverse_ip),
             # Virtual host discovery runs BEFORE dedup/httpx so new vhosts
             # end up in all_subdomains.txt and get probed by httpx.
             ("Virtual host discovery", self._vhost_discovery),
             ("Subdomain dedup",        self._deduplicate_subdomains),
             ("HTTP probe (httpx)",     self._httpx_probe),
+            ("JS subdomain mining",    self._js_subdomain_mining),
             ("Favicon hash",           self._favicon_hash),
             ("Google dorks",           self._google_dorks),
             ("Port scan (nmap)",       self._nmap),

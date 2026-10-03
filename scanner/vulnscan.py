@@ -16,6 +16,7 @@ from .checks import (
     XSSCheck, FamousCVEsCheck,
     CSRFCheck, GitHubLeaksCheck, S3BucketCheck, TechAdaptiveCheck,
     HTTPSmugglingCheck,
+    CVEMegaCheck,
     NucleiScan, NiktoScan, DirBruteCheck,
     TakeoverCheck, Bypass403Check, OpenRedirectCheck,
 )
@@ -57,6 +58,7 @@ class VulnScanner:
         S3BucketCheck,
         TechAdaptiveCheck,
         HTTPSmugglingCheck,
+        CVEMegaCheck,
         NucleiScan,
         NiktoScan,
         DirBruteCheck,

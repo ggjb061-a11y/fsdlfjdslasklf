@@ -26,6 +26,7 @@ from .github_leaks import GitHubLeaksCheck
 from .s3_buckets import S3BucketCheck
 from .tech_adaptive import TechAdaptiveCheck
 from .http_smuggling import HTTPSmugglingCheck
+from .cves_check import CVEMegaCheck
 from .nuclei_scan import NucleiScan
 from .nikto_scan import NiktoScan
 from .dirbrute import DirBruteCheck
@@ -61,6 +62,7 @@ ALL_CHECKS = [
     S3BucketCheck,
     TechAdaptiveCheck,
     HTTPSmugglingCheck,
+    CVEMegaCheck,
     NucleiScan,
     NiktoScan,
     DirBruteCheck,
