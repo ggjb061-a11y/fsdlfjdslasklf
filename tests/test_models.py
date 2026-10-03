@@ -10,7 +10,10 @@ class TestFinding(unittest.TestCase):
         self.assertEqual(Finding("medium", "", "", "", "").sev_order(), 2)
         self.assertEqual(Finding("low", "", "", "", "").sev_order(), 3)
         self.assertEqual(Finding("info", "", "", "", "").sev_order(), 4)
-        self.assertEqual(Finding("unknown", "", "", "", "").sev_order(), 5)
+        # New behavior: unknown severities are normalized to "info"
+        f = Finding("unknown", "", "", "", "")
+        self.assertEqual(f.severity, "info")
+        self.assertEqual(f.sev_order(), 4)
 
     def test_case_insensitive_severity(self):
         self.assertEqual(Finding("CRITICAL", "", "", "", "").sev_order(), 0)

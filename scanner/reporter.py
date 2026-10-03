@@ -63,11 +63,26 @@ ul.ls li{color:var(--tx2);font-size:13px;margin-bottom:2px}
 .method-row td:first-child{font-weight:600;white-space:nowrap}
 .danger{color:var(--crit);font-weight:700}
 
+/* Interactive controls */
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.controls input[type=text]{flex:1;min-width:220px;background:var(--bg);border:1px solid var(--bd);color:var(--tx);padding:7px 10px;border-radius:6px;font-size:13px;font-family:inherit}
+.controls input[type=text]:focus{outline:none;border-color:var(--ac)}
+.controls select{background:var(--bg);border:1px solid var(--bd);color:var(--tx);padding:7px 10px;border-radius:6px;font-size:13px}
+.filter-btn{background:var(--s2);border:1px solid var(--bd);color:var(--tx);padding:7px 12px;border-radius:999px;font-size:12px;cursor:pointer;transition:all .15s;user-select:none}
+.filter-btn.active{background:var(--ac);color:#000;border-color:var(--ac);font-weight:600}
+.filter-btn:hover{background:var(--bd)}
+.hidden{display:none !important}
+tr.row-hidden{display:none}
+.result-count{color:var(--tx2);font-size:12px;margin-left:auto}
+.owasp-badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;background:#21262d;color:#8b949e;margin:1px}
+
 @media(max-width:700px){
   .hdr{padding:14px 16px}
   .wrap{padding:16px 8px}
   .grid{grid-template-columns:repeat(3,1fr)}
   table{font-size:12px}
+  .controls{flex-direction:column;align-items:stretch}
+  .controls input[type=text]{min-width:unset}
 }
 </style>
 </head>
@@ -96,21 +111,49 @@ ul.ls li{color:var(--tx2);font-size:13px;margin-bottom:2px}
   <div class="card"><div class="n">{{ emails|length }}</div><div class="l">Emails</div></div>
 </div>
 
-<!-- ─── ALL FINDINGS ─────────────────────────────────────────────────── -->
+<!-- ─── OWASP SUMMARY ────────────────────────────────────────────────── -->
+{% if owasp_counts %}
+<section id="s-owasp" class="closed">
+  <h2 onclick="T('s-owasp')">OWASP Top 10 (2021) Mapping<span class="cnt">({{ owasp_counts|length }} categories)</span></h2>
+  <div class="bd">
+  <table>
+    <thead><tr><th>Category</th><th>Count</th></tr></thead>
+    <tbody>
+    {% for cat, n in owasp_counts.items() %}
+    <tr><td>{{ cat }}</td><td>{{ n }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+<!-- ─── ALL FINDINGS (searchable + filterable) ───────────────────────── -->
 <section id="s-findings">
   <h2 onclick="T('s-findings')">All Findings<span class="cnt">({{ findings|length }})</span></h2>
   <div class="bd">
   {% if findings %}
-  <table>
-    <thead><tr><th>Sev</th><th>Title</th><th>Host</th><th>Source</th><th>Detail</th></tr></thead>
+  <div class="controls">
+    <input type="text" id="findings-search" placeholder="Search title / host / detail / tag...">
+    <button class="filter-btn active" data-sev="all" onclick="FS(this)">All</button>
+    <button class="filter-btn" data-sev="critical" onclick="FS(this)" style="color:var(--crit)">Critical ({{ counts.critical }})</button>
+    <button class="filter-btn" data-sev="high" onclick="FS(this)" style="color:var(--high)">High ({{ counts.high }})</button>
+    <button class="filter-btn" data-sev="medium" onclick="FS(this)" style="color:var(--med)">Medium ({{ counts.medium }})</button>
+    <button class="filter-btn" data-sev="low" onclick="FS(this)" style="color:var(--low)">Low ({{ counts.low }})</button>
+    <button class="filter-btn" data-sev="info" onclick="FS(this)">Info ({{ counts.info }})</button>
+    <span class="result-count" id="findings-count">{{ findings|length }} shown</span>
+  </div>
+  <table id="findings-table">
+    <thead><tr><th>Sev</th><th>Title</th><th>Host</th><th>Source</th><th>OWASP</th><th>Detail</th></tr></thead>
     <tbody>
     {% for f in findings %}
-    <tr>
+    <tr class="finding-row" data-sev="{{ f.severity }}" data-source="{{ f.source }}" data-text="{{ (f.title + ' ' + f.host + ' ' + f.detail + ' ' + (f.tags|join(' '))) | lower }}">
       <td><span class="sev s-{{ f.severity }}">{{ f.severity }}</span></td>
       <td>{{ f.title }}</td>
       <td style="max-width:200px">{{ f.host }}</td>
       <td><span class="tag">{{ f.source }}</span></td>
-      <td style="max-width:350px">{{ f.detail[:200] }}</td>
+      <td><span class="owasp-badge">{{ f.owasp }}</span></td>
+      <td style="max-width:300px">{{ f.detail[:200] }}</td>
     </tr>
     {% endfor %}
     </tbody>
@@ -357,6 +400,54 @@ ul.ls li{color:var(--tx2);font-size:13px;margin-bottom:2px}
 </div>
 <script>
 function T(id){document.getElementById(id).classList.toggle('closed')}
+
+// Findings filter + search
+(function(){
+  var activeSev = 'all';
+  var searchBox = document.getElementById('findings-search');
+  var tbl = document.getElementById('findings-table');
+  if(!tbl) return;
+  var rows = tbl.querySelectorAll('.finding-row');
+  var cnt = document.getElementById('findings-count');
+
+  function apply(){
+    var query = (searchBox && searchBox.value || '').toLowerCase().trim();
+    var shown = 0;
+    rows.forEach(function(r){
+      var sevOk = (activeSev === 'all' || r.dataset.sev === activeSev);
+      var txtOk = (!query || (r.dataset.text && r.dataset.text.indexOf(query) !== -1));
+      if(sevOk && txtOk){
+        r.classList.remove('row-hidden');
+        shown++;
+      } else {
+        r.classList.add('row-hidden');
+      }
+    });
+    if(cnt) cnt.textContent = shown + ' shown';
+  }
+
+  window.FS = function(btn){
+    document.querySelectorAll('.filter-btn').forEach(function(b){b.classList.remove('active')});
+    btn.classList.add('active');
+    activeSev = btn.dataset.sev;
+    apply();
+  };
+
+  if(searchBox){
+    var tmo;
+    searchBox.addEventListener('input', function(){
+      clearTimeout(tmo);
+      tmo = setTimeout(apply, 60);
+    });
+    // Keyboard shortcut: / focuses search
+    document.addEventListener('keydown', function(e){
+      if(e.key === '/' && document.activeElement !== searchBox){
+        e.preventDefault();
+        searchBox.focus();
+      }
+    });
+  }
+})();
 </script>
 </body>
 </html>"""
@@ -373,6 +464,10 @@ def generate(result, formats: list = None) -> str:
         formats = ["html", "json", "markdown"]
 
     counts = result.count_by_severity()
+    # Only include categories with >0 count; keep order by severity (most
+    # severe first) so the UI leads with the worst class.
+    owasp_counts_raw = result.count_by_owasp() if hasattr(result, "count_by_owasp") else {}
+    owasp_counts = dict(sorted(owasp_counts_raw.items(), key=lambda x: -x[1]))
     env = Environment(loader=BaseLoader(), autoescape=True)
     tmpl = env.from_string(REPORT_HTML)
 
@@ -380,7 +475,9 @@ def generate(result, formats: list = None) -> str:
         target=result.target,
         scan_date=result.scan_date,
         counts=counts,
-        findings=[vars(f) for f in result.sorted_findings()],
+        owasp_counts=owasp_counts,
+        findings=[f.to_dict() if hasattr(f, "to_dict") else vars(f)
+                  for f in result.sorted_findings()],
         js_secrets=[vars(s) for s in result.js_secrets],
         js_endpoints=getattr(result, "js_endpoints", []),
         methods=result.allowed_methods,
