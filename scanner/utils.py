@@ -88,8 +88,11 @@ def run(
 def create_dirs(base: str, target: str) -> dict:
     """Create per-target timestamped directory tree. Returns path dict."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe = re.sub(r"[^a-zA-Z0-9._-]", "_", target)
-    root = Path(base) / safe / ts
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", target)
+    safe = re.sub(r"_+", "_", safe).strip("_") or "target"
+    root = Path(base).resolve() / safe / ts
+    if Path(base).resolve() not in root.parents:
+        raise ValueError(f"Unsafe target path: {target}")
 
     layout = {
         "base":         root,
