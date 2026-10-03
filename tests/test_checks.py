@@ -49,7 +49,9 @@ class TestCheckStaticData(unittest.TestCase):
         self.assertIn("/graphql", GraphQLCheck.GRAPHQL_PATHS)
 
     def test_crlf_payloads_present(self):
-        self.assertGreater(len(CRLFCheck.PAYLOADS), 2)
+        self.assertGreater(len(CRLFCheck.CRLF_VARIANTS), 2)
+        labels = {v[0] for v in CRLFCheck.CRLF_VARIANTS}
+        self.assertIn("url-pct", labels)
 
     def test_cloud_metadata_covers_three_clouds(self):
         clouds = [c for c, _ in CloudMetadataCheck.METADATA_URLS]
@@ -77,16 +79,17 @@ class TestCheckStaticData(unittest.TestCase):
         self.assertIn("ENTITY xxe SYSTEM", XXECheck.XXE_PAYLOAD)
 
     def test_ssti_payloads(self):
-        self.assertGreater(len(SSTICheck.PAYLOADS), 3)
-        for engine, payload, expected in SSTICheck.PAYLOADS:
-            self.assertTrue(engine)
+        self.assertGreater(len(SSTICheck.PRIMARY), 3)
+        for payload, expected, engines in SSTICheck.PRIMARY:
             self.assertTrue(payload)
             self.assertTrue(expected)
+            self.assertTrue(engines)
 
     def test_path_traversal(self):
         self.assertIn("file", PathTraversalCheck.PARAMS)
-        self.assertGreater(len(PathTraversalCheck.PAYLOADS), 4)
-        self.assertIn("root:x:0:0", PathTraversalCheck.INDICATORS)
+        self.assertGreater(len(PathTraversalCheck.LINUX_PAYLOADS), 4)
+        self.assertIn("root:x:0:0", PathTraversalCheck.LINUX_INDICATORS)
+        self.assertGreater(len(PathTraversalCheck.WIN_PAYLOADS), 2)
 
     def test_sqli_signatures(self):
         self.assertGreater(len(SQLInjectionCheck.ERROR_SIGNATURES), 5)
