@@ -19,7 +19,7 @@ from scanner.utils import create_dirs
 
 class TestChecksRegistry(unittest.TestCase):
     def test_all_checks_registered(self):
-        self.assertGreaterEqual(len(ALL_CHECKS), 28)
+        self.assertGreaterEqual(len(ALL_CHECKS), 32)
         self.assertIn(SqlmapCheck, ALL_CHECKS)
         for cls in ALL_CHECKS:
             self.assertTrue(issubclass(cls, BaseCheck),

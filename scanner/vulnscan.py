@@ -14,6 +14,7 @@ from .checks import (
     NoSQLInjectionCheck, JWTWeaknessCheck,
     DeserializationCheck, CSPCookieCheck, LDAPInjectionCheck,
     XSSCheck, FamousCVEsCheck,
+    CSRFCheck, GitHubLeaksCheck, S3BucketCheck, TechAdaptiveCheck,
     NucleiScan, NiktoScan, DirBruteCheck,
     TakeoverCheck, Bypass403Check, OpenRedirectCheck,
 )
@@ -50,6 +51,10 @@ class VulnScanner:
         LDAPInjectionCheck,
         XSSCheck,
         FamousCVEsCheck,
+        CSRFCheck,
+        GitHubLeaksCheck,
+        S3BucketCheck,
+        TechAdaptiveCheck,
         NucleiScan,
         NiktoScan,
         DirBruteCheck,

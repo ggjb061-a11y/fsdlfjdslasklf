@@ -21,6 +21,10 @@ from .csp_cookies import CSPCookieCheck
 from .ldap_injection import LDAPInjectionCheck
 from .xss import XSSCheck
 from .famous_cves import FamousCVEsCheck
+from .csrf import CSRFCheck
+from .github_leaks import GitHubLeaksCheck
+from .s3_buckets import S3BucketCheck
+from .tech_adaptive import TechAdaptiveCheck
 from .nuclei_scan import NucleiScan
 from .nikto_scan import NiktoScan
 from .dirbrute import DirBruteCheck
@@ -51,6 +55,10 @@ ALL_CHECKS = [
     LDAPInjectionCheck,
     XSSCheck,
     FamousCVEsCheck,
+    CSRFCheck,
+    GitHubLeaksCheck,
+    S3BucketCheck,
+    TechAdaptiveCheck,
     NucleiScan,
     NiktoScan,
     DirBruteCheck,
