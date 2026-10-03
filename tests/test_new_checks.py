@@ -121,7 +121,10 @@ class TestGitHubLeaks(unittest.TestCase):
              patch("scanner.checks.github_leaks.time.sleep", lambda *_a, **_k: None):
             findings = c.execute()
             self.assertTrue(findings)
-            self.assertEqual(findings[0].severity, "high")
+            # A code-search hit is a MEDIUM lead (needs manual review),
+            # not a confirmed credential disclosure.
+            self.assertEqual(findings[0].severity, "medium")
+            self.assertIn("needs-manual-review", findings[0].tags)
             self.assertIn("Possible leaked", findings[0].title)
 
 

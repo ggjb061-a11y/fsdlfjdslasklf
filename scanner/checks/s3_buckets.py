@@ -148,10 +148,14 @@ class S3BucketCheck(BaseCheck):
                 detail = (f"Bucket '{r['bucket']}' on {r['provider']} is publicly "
                           f"listable at {r['url']} - full contents enumerable")
             elif r["state"] == "access-denied":
-                sev = "medium"
+                # Bucket exists but blocks listing - this is only a name
+                # confirmation, not an exposure. Keep it as LOW to inform
+                # the auditor without inflating the finding list.
+                sev = "low"
                 title = f"{r['provider']} bucket exists (private): {r['bucket']}"
                 detail = (f"Bucket '{r['bucket']}' on {r['provider']} exists but "
-                          f"blocks listing. Name disclosure helps targeted attacks.")
+                          f"blocks listing. Name disclosure confirms the target's "
+                          f"cloud footprint; no data is accessible.")
             else:
                 sev = "info"
                 title = f"{r['provider']} bucket responds: {r['bucket']}"

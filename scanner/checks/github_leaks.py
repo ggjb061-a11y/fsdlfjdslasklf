@@ -122,14 +122,20 @@ class GitHubLeaksCheck(BaseCheck):
                 continue
             if token_available:
                 for hit in hits:
+                    # A code-search hit only proves the two strings appear
+                    # in the same file - not that a real credential is
+                    # exposed. The file may be a tutorial, template or
+                    # test fixture. Severity is MEDIUM with the review
+                    # tag; it escalates on manual confirmation.
                     self.findings.append(Finding(
-                        severity="high",
+                        severity="medium",
                         title=f"Possible leaked '{dork}' for {target} on GitHub",
                         host=target,
                         detail=(
                             f"GitHub code search found '{target}' near '{dork}' in "
-                            f"{hit['repository']}/{hit['path']}. Review the file "
-                            f"to confirm an actual credential is exposed."
+                            f"{hit['repository']}/{hit['path']}. The hit alone does "
+                            f"not prove a credential is exposed; open the file and "
+                            f"check whether a real secret is on the matched line."
                         ),
                         source="github_leaks",
                         url=hit["html_url"],
