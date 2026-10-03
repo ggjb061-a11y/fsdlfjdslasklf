@@ -15,6 +15,7 @@ from .checks import (
     DeserializationCheck, CSPCookieCheck, LDAPInjectionCheck,
     XSSCheck, FamousCVEsCheck,
     CSRFCheck, GitHubLeaksCheck, S3BucketCheck, TechAdaptiveCheck,
+    HTTPSmugglingCheck,
     NucleiScan, NiktoScan, DirBruteCheck,
     TakeoverCheck, Bypass403Check, OpenRedirectCheck,
 )
@@ -55,6 +56,7 @@ class VulnScanner:
         GitHubLeaksCheck,
         S3BucketCheck,
         TechAdaptiveCheck,
+        HTTPSmugglingCheck,
         NucleiScan,
         NiktoScan,
         DirBruteCheck,
