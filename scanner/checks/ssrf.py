@@ -33,26 +33,30 @@ class SSRFCheck(BaseCheck):
 
     def execute(self) -> list[Finding]:
         for base in self._hosts():
+            baseline = self._baseline(base)
             for param in self.SSRF_PARAMS:
                 for probe_name, probe_url in self.PROBES:
-                    test_url = f"{base}?{param}={probe_url}"
-                    rc, body, _ = run(
-                        ["curl", "-sL", "--max-time", "6", test_url],
-                        timeout=10,
-                    )
-                    if rc != 0 or not body or len(body) < 50:
+                    test_url = self._url(base, param, probe_url)
+                    body = self._fetch(test_url, timeout=6)
+                    if not body or len(body) < 50:
                         continue
                     for indicator in self.LOCALHOST_INDICATORS:
-                        if indicator in body:
-                            self.findings.append(Finding(
-                                severity="high",
-                                title=f"SSRF via parameter '{param}' ({probe_name})",
-                                host=base,
-                                detail=f"Parameter '{param}' fetches arbitrary URLs; "
-                                       f"response contains '{indicator}' indicating internal access",
-                                source="ssrf",
-                                url=test_url,
-                                evidence=indicator,
-                            ))
-                            return self.findings
+                        if indicator not in body:
+                            continue
+                        # Baseline guard: if the host's benign response already
+                        # contains the indicator (e.g. Apache/nginx error page
+                        # mentioning its own banner), it's not SSRF.
+                        if baseline and indicator in baseline:
+                            continue
+                        self.findings.append(Finding(
+                            severity="high",
+                            title=f"SSRF via parameter '{param}' ({probe_name})",
+                            host=base,
+                            detail=f"Parameter '{param}' fetches arbitrary URLs; "
+                                   f"response contains '{indicator}' indicating internal access",
+                            source="ssrf",
+                            url=test_url,
+                            evidence=indicator,
+                        ))
+                        return self.findings
         return self.findings

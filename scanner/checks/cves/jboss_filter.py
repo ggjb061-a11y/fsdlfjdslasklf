@@ -5,7 +5,7 @@ from .base import CVEDetector, CVEResult
 class JBossReadOnly(CVEDetector):
     cve_id = "CVE-2017-12149"
     title = "JBoss ReadOnlyAccessFilter Deserialization (endpoint reachable)"
-    severity = "critical"
+    severity = "high"
     affected = "JBoss EAP 6.x / AS 5.x / 6.x"
     tags = ["cve-2017-12149", "jboss", "deserialization", "rce"]
 

@@ -60,14 +60,20 @@ class XXECheck(BaseCheck):
                      "-d", self.XXE_OOB_PAYLOAD, url],
                     timeout=12,
                 )
-                if out_err and ("Connection refused" in out_err or "127.0.0.1" in out_err):
+                if out_err and "Connection refused" in out_err:
+                    # Server reported "Connection refused" after we told it to
+                    # fetch http://127.0.0.1:1/ — strong signal the parser
+                    # actually attempted the request. Medium (not high)
+                    # because body-echo of the request can still FP, and no
+                    # file content was disclosed.
                     body_lower = out_err.lower()
-                    if "parser" in body_lower or "xml" in body_lower:
+                    if ("parser" in body_lower or "entity" in body_lower
+                            or "resolve" in body_lower):
                         self.findings.append(Finding(
-                            severity="high",
+                            severity="medium",
                             title="Potential XXE - External Entity Processed",
                             host=base,
-                            detail=f"XML parser at {url} attempted to resolve external entity",
+                            detail=f"XML parser at {url} attempted to resolve external entity (OOB probe triggered connection error)",
                             source="xxe",
                             url=url,
                         ))

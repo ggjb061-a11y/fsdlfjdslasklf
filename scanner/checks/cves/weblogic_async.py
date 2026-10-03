@@ -5,7 +5,7 @@ from .base import CVEDetector, CVEResult
 class WeblogicAsyncResponseService(CVEDetector):
     cve_id = "CVE-2019-2725"
     title = "Oracle WebLogic AsyncResponseService deserialization (endpoint reachable)"
-    severity = "critical"
+    severity = "high"
     affected = "Oracle WebLogic Server 10.3.6.0 / 12.1.3.0"
     tags = ["cve-2019-2725", "weblogic", "deserialization", "rce"]
 

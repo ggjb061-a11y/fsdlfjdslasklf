@@ -5,7 +5,7 @@ from .base import CVEDetector, CVEResult
 class WeblogicWLSSecurity(CVEDetector):
     cve_id = "CVE-2017-10271"
     title = "Oracle WebLogic WLS Security XMLDecoder RCE (endpoint reachable)"
-    severity = "critical"
+    severity = "high"
     affected = "Oracle WebLogic Server 10.x / 12.x pre-patch"
     tags = ["cve-2017-10271", "weblogic", "xmldecoder", "rce"]
 

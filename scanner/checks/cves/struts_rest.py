@@ -5,7 +5,7 @@ from .base import CVEDetector, CVEResult
 class StrutsREST(CVEDetector):
     cve_id = "CVE-2017-9805"
     title = "Apache Struts REST Plugin XStream RCE (endpoint reachable)"
-    severity = "critical"
+    severity = "high"
     affected = "Apache Struts 2.5 - 2.5.12 (REST plugin with XStream)"
     tags = ["cve-2017-9805", "struts", "xstream", "deserialization", "rce"]
 
@@ -15,16 +15,26 @@ class StrutsREST(CVEDetector):
             status, body = self._get(base + p, timeout=8)
             if not body:
                 continue
-            if ("orders" in body.lower() and ("<order" in body.lower() or
-                                               "xml" in body.lower() or
-                                               "struts" in body.lower())):
-                return CVEResult(
-                    vulnerable=True,
-                    url=base + p,
-                    evidence=body[:200],
-                    detail=(
-                        "Struts REST plugin endpoint reachable. CVE-2017-9805 "
-                        "allows unauth XStream deserialization -> RCE."
-                    ),
-                )
+            body_lower = body.lower()
+            # Require TWO distinct Struts-specific markers to fire. "orders"
+            # alone is too generic (many e-commerce sites return it) so we
+            # also require a Struts/XStream fingerprint plus an XML body.
+            struts_markers = ("struts2", "org.apache.struts",
+                               "xstream", "x-struts", "struts-rest")
+            if not any(m in body_lower for m in struts_markers):
+                continue
+            if "<order" not in body_lower and "<orders" not in body_lower:
+                continue
+            if "<order" in baseline_body.lower():
+                continue
+            return CVEResult(
+                vulnerable=True,
+                url=base + p,
+                evidence=body[:200],
+                detail=(
+                    "Struts REST plugin endpoint reachable. CVE-2017-9805 "
+                    "allows unauth XStream deserialization -> RCE on "
+                    "vulnerable versions."
+                ),
+            )
         return None

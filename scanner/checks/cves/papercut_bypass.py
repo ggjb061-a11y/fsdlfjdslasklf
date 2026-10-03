@@ -15,7 +15,23 @@ class PaperCutBypass(CVEDetector):
         status, body = self._get(base + self.PATH, timeout=8)
         if not body:
             return None
-        if "papercut" in body.lower() and ("setup" in body.lower() or "admin" in body.lower()):
+        # Patched servers redirect to login (status 302/200 with login page).
+        # Vulnerable servers return the SetupCompleted page directly with
+        # a very specific marker ("Configuration Wizard : Setup Complete",
+        # a Next button, or the SetupCompleted service id).
+        body_lower = body.lower()
+        if "papercut" not in body_lower:
+            return None
+        strong_markers = [
+            "setupcompleted",
+            "configuration wizard",
+            "setup complete",
+            "setup-complete",
+        ]
+        login_markers = ["login", "sign in", "username", "password"]
+        has_strong = any(m in body_lower for m in strong_markers)
+        looks_like_login = any(m in body_lower for m in login_markers)
+        if has_strong and not looks_like_login:
             return CVEResult(
                 vulnerable=True,
                 url=base + self.PATH,

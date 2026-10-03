@@ -222,19 +222,38 @@ class TestWSO2(unittest.TestCase):
 class TestPaperCut(unittest.TestCase):
     def test_detects(self):
         from scanner.checks.cves.papercut_bypass import PaperCutBypass
+        # Needs a strong SetupCompleted marker AND no login-page markers.
         d = PaperCutBypass(canned_run([
-            (0, wrap_body("PaperCut Setup admin"), "")
+            (0, wrap_body("PaperCut Configuration Wizard - Setup Complete"), "")
         ]))
         self.assertIsNotNone(d.probe("https://x", ""))
+
+    def test_suppresses_login_page(self):
+        from scanner.checks.cves.papercut_bypass import PaperCutBypass
+        # A patched PaperCut redirecting to login must NOT fire.
+        d = PaperCutBypass(canned_run([
+            (0, wrap_body("PaperCut Login - please enter your username and password"), "")
+        ]))
+        self.assertIsNone(d.probe("https://x", ""))
 
 
 class TestStrutsRest(unittest.TestCase):
     def test_detects(self):
         from scanner.checks.cves.struts_rest import StrutsREST
+        # Needs a Struts-specific marker in addition to <order> element.
         d = StrutsREST(canned_run([
-            (0, wrap_body("<orders><order></order></orders>"), "")
+            (0, wrap_body("<orders xmlns='struts2'><order></order></orders>"), "")
         ]))
         self.assertIsNotNone(d.probe("https://x", ""))
+
+    def test_rejects_generic_orders(self):
+        from scanner.checks.cves.struts_rest import StrutsREST
+        # Generic e-commerce page with "<order>" but no Struts fingerprint
+        # must NOT fire (prevents FP on random order-tracking endpoints).
+        d = StrutsREST(canned_run([
+            (0, wrap_body("<orders><order id='1'/></orders>"), "")
+        ]))
+        self.assertIsNone(d.probe("https://x", ""))
 
 
 class TestMegaCheckIntegration(unittest.TestCase):
