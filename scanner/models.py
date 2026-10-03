@@ -60,6 +60,41 @@ OWASP_HINTS = {
     "form_fuzzer":       "A03:2021-Injection",
     "nuclei":            "A06:2021-Vulnerable and Outdated Components",
     "nikto":             "A06:2021-Vulnerable and Outdated Components",
+    "mail_security":     "A05:2021-Security Misconfiguration",
+    "dnssec":            "A05:2021-Security Misconfiguration",
+    "shodan_internetdb": "A06:2021-Vulnerable and Outdated Components",
+    "security_txt":      "A05:2021-Security Misconfiguration",
+    "robots":            "A05:2021-Security Misconfiguration",
+    "sensitive_files":   "A05:2021-Security Misconfiguration",
+    "sitemap":           "A05:2021-Security Misconfiguration",
+    "cms_detect":        "A06:2021-Vulnerable and Outdated Components",
+    "method_tester":     "A05:2021-Security Misconfiguration",
+    "exchange":          "A06:2021-Vulnerable and Outdated Components",
+    "gitlab":            "A06:2021-Vulnerable and Outdated Components",
+    "follina":           "A08:2021-Software and Data Integrity Failures",
+    "struts2":           "A08:2021-Software and Data Integrity Failures",
+    "weblogic":          "A06:2021-Vulnerable and Outdated Components",
+    "jboss":             "A08:2021-Software and Data Integrity Failures",
+    "spring4shell":      "A03:2021-Injection",
+    "confluence":        "A03:2021-Injection",
+    "shellshock":        "A03:2021-Injection",
+    "log4shell":         "A03:2021-Injection",
+    "param_discovery":   "A05:2021-Security Misconfiguration",
+    "subjack":           "A01:2021-Broken Access Control",
+    "takeover_fingerprint": "A01:2021-Broken Access Control",
+    "f5_bigip":          "A06:2021-Vulnerable and Outdated Components",
+    "citrix":            "A06:2021-Vulnerable and Outdated Components",
+    "phpunit":           "A08:2021-Software and Data Integrity Failures",
+    "drupalgeddon":      "A06:2021-Vulnerable and Outdated Components",
+    "papercut":          "A07:2021-Identification and Authentication Failures",
+    "tech_adaptive":     "A06:2021-Vulnerable and Outdated Components",
+    "dns_axfr":          "A05:2021-Security Misconfiguration",
+    "js_analyzer":       "A07:2021-Identification and Authentication Failures",
+    "dirbrute":          "A05:2021-Security Misconfiguration",
+    "graphql":           "A05:2021-Security Misconfiguration",
+    "openssl":           "A02:2021-Cryptographic Failures",
+    "probe":             "A05:2021-Security Misconfiguration",
+    "correlator":        "A03:2021-Injection",
 }
 
 
@@ -115,11 +150,14 @@ class Finding:
         src = (self.source or "").lower()
         if src in OWASP_HINTS:
             return OWASP_HINTS[src]
+        # 2b. CVE-prefixed sources all map to Vulnerable Components
+        if src.startswith("cve:") or src.startswith("cve-"):
+            return "A06:2021-Vulnerable and Outdated Components"
         # 3. Tag-based hint
         for t in self.tags:
             if t in OWASP_HINTS:
                 return OWASP_HINTS[t]
-        return "Unmapped"
+        return "A05:2021-Security Misconfiguration"  # safe default for misconfig-like findings
 
     def to_dict(self) -> dict:
         """Dict representation including derived fields."""
