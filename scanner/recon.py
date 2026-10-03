@@ -515,6 +515,7 @@ class ReconModule:
             ("Port scan (masscan)",    self._masscan),
             ("Tech detect (whatweb)",  self._whatweb),
             ("WAF detect (wafw00f)",   self._wafw00f),
+            ("Extended recon",         self._extended_recon),
         ]
         for name, fn in steps:
             logger.info(f"  → {name}")
@@ -522,3 +523,25 @@ class ReconModule:
                 fn()
             except Exception as exc:
                 logger.error(f"    [!] {name}: {exc}")
+
+    def _extended_recon(self) -> None:
+        """Run extended-recon passes (ASN, Shodan InternetDB, SPF/DMARC, ...)."""
+        from . import recon_extended
+        out = recon_extended.extend_recon(
+            target=self.target,
+            dirs=self.dirs,
+            live_hosts=self.live_hosts,
+            host_records=self.host_records,
+            subdomains=self.subdomains,
+            threads=self.threads,
+        )
+        self.findings.extend(out.get("findings", []))
+        new_subs = [s for s in out.get("extra_subdomains", []) if s not in self.subdomains]
+        self.subdomains.extend(new_subs)
+        self.asn_info = out.get("asn_info", {})
+        self.shodan_info = out.get("shodan_info", {})
+        self.geo_info = out.get("geo_info", {})
+        self.http_versions = out.get("http_versions", {})
+        if new_subs:
+            all_file = f"{self.dirs['subdomains']}/all_subdomains.txt"
+            write_lines(all_file, sorted(set(self.subdomains)))

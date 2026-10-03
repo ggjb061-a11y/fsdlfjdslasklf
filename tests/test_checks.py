@@ -9,6 +9,7 @@ from scanner.checks import (
     SQLInjectionCheck, CommandInjectionCheck,
     NoSQLInjectionCheck, JWTWeaknessCheck,
     DeserializationCheck, CSPCookieCheck, LDAPInjectionCheck,
+    XSSCheck, FamousCVEsCheck,
     Bypass403Check, OpenRedirectCheck, DirBruteCheck,
     ALL_CHECKS,
 )
@@ -18,7 +19,7 @@ from scanner.utils import create_dirs
 
 class TestChecksRegistry(unittest.TestCase):
     def test_all_checks_registered(self):
-        self.assertGreaterEqual(len(ALL_CHECKS), 25)
+        self.assertGreaterEqual(len(ALL_CHECKS), 27)
         for cls in ALL_CHECKS:
             self.assertTrue(issubclass(cls, BaseCheck),
                             f"{cls.__name__} must subclass BaseCheck")
@@ -121,6 +122,30 @@ class TestCheckStaticData(unittest.TestCase):
     def test_ldap_payloads(self):
         self.assertGreater(len(LDAPInjectionCheck.LDAP_PAYLOADS), 3)
         self.assertIn("/login", LDAPInjectionCheck.LOGIN_PATHS)
+
+    def test_xss_payloads(self):
+        self.assertGreater(len(XSSCheck.PAYLOADS), 3)
+        contexts = {p[0] for p in XSSCheck.PAYLOADS}
+        self.assertIn("html", contexts)
+        self.assertIn("js", contexts)
+        self.assertIn("attr", contexts)
+
+    def test_famous_cves_covers_known_cves(self):
+        """Spot-check: the famous-CVE module probes Log4Shell, Shellshock, Struts."""
+        import tempfile
+        from scanner.utils import create_dirs
+        with tempfile.TemporaryDirectory() as tmp:
+            dirs = create_dirs(tmp, "example.com")
+            check = FamousCVEsCheck(target="example.com", dirs=dirs,
+                                    live_hosts=[], threads=1)
+            # Ensure the probe method names cover the big CVEs
+            method_names = [m for m in dir(check) if m.startswith("_")]
+            self.assertIn("_log4shell", method_names)
+            self.assertIn("_shellshock", method_names)
+            self.assertIn("_struts", method_names)
+            self.assertIn("_spring4shell", method_names)
+            self.assertIn("_confluence", method_names)
+            self.assertIn("_f5_bigip", method_names)
 
 
 class TestJWTWeakness(unittest.TestCase):

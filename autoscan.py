@@ -261,6 +261,10 @@ def scan_target(target: str, args: argparse.Namespace, resume_dir: str = None) -
         result.waf = recon.waf
         result.ports_raw = recon.ports_raw
         result.google_dorks = recon.google_dorks
+        result.asn_info = getattr(recon, 'asn_info', {})
+        result.shodan_info = getattr(recon, 'shodan_info', {})
+        result.geo_info = getattr(recon, 'geo_info', {})
+        result.http_versions = getattr(recon, 'http_versions', {})
         result.findings.extend(getattr(recon, 'findings', []))
         cm.mark_done("recon", {
             "subdomains": result.subdomains,

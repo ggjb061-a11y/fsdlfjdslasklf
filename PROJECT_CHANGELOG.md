@@ -2,6 +2,98 @@
 
 Version numbers follow the project's own `scanner/__init__.py::__version__`.
 
+## 3.4.0 (2026-10-03) - Depth pass: comprehensive SQLi/XSS, famous CVEs, massive recon expansion
+
+Driven by user request: "add well-known famous vulns, make existing checks
+deeper and more professional, expand recon massively, test for false positives."
+
+### SQL Injection rewritten for depth and accuracy
+`scanner/checks/sql_injection.py` is now a 4-technique probe:
+1. **Error-based** across 6 DB engines (MySQL / PostgreSQL / MSSQL / Oracle /
+   SQLite / Generic) with 70+ signatures - and crucially, each signature is
+   compared against a benign baseline so pre-existing error strings on
+   debug pages don't trigger false positives.
+2. **Boolean-based** - response-length delta between `1=1` and `1=2`
+   payloads; requires TRUE ≈ baseline (delta < 50B) and FALSE ≫ baseline
+   (delta > 500B) to confirm.
+3. **Time-based blind** - MySQL SLEEP / PostgreSQL pg_sleep / MSSQL
+   WAITFOR DELAY / Oracle DBMS_PIPE.RECEIVE_MESSAGE. Requires ≥4.5s delay
+   AND confirmation on a second shot to kill network-flake FPs.
+4. **UNION-based** via ORDER BY column enumeration.
+
+### XSS now active + context-aware
+New `scanner/checks/xss.py` detects reflected XSS by:
+1. Firing a benign canary first; abort unless reflected.
+2. Classifying the reflection context (HTML / attribute / JavaScript).
+3. Firing a context-appropriate payload; emit a finding ONLY when the
+   payload bytes survive unencoded in the body.
+
+### Famous CVE detection module
+New `scanner/checks/famous_cves.py` fingerprints:
+- CVE-2021-44228 **Log4Shell** (JNDI in User-Agent/Referer/X-Api-Version)
+- CVE-2014-6271 **Shellshock** (bash function definition payload)
+- CVE-2017-5638 **Apache Struts2 OGNL**
+- CVE-2022-22965 **Spring4Shell**
+- CVE-2022-26134 **Atlassian Confluence OGNL**
+- CVE-2022-1388  **F5 BIG-IP iControl REST auth bypass**
+- CVE-2021-26855 / CVE-2021-34473 **Exchange ProxyLogon/ProxyShell detection**
+- CVE-2021-22205 **GitLab (passive detection)**
+- CVE-2022-30190 **Follina ms-msdt URI**
+- CVE-2018-7600  **Drupalgeddon 2**
+- CVE-2017-9841  **PHPUnit eval-stdin.php**
+
+### Massive recon expansion (new `scanner/recon_extended.py`)
+Hooked into `ReconModule.run()` as a final step:
+- **ASN / BGP lookup** via Team Cymru whois (dig TXT)
+- **Shodan InternetDB** (`internetdb.shodan.io`) - FREE, no API key -
+  returns open ports, hostnames, known CVEs per IP; emits findings for
+  each CVE reported.
+- **SPF / DMARC / DNSSEC analysis** - flags `+all`, `?all`, missing policies,
+  `p=none`, absent DS record.
+- **security.txt discovery** at `/.well-known/security.txt`
+- **HTTP/2 + HTTP/3 detection** via ALPN probe + Alt-Svc header
+- **IP geolocation** via `ip-api.com` free tier
+- **DNS brute-force** with built-in top-100 wordlist (socket-based,
+  parallel ThreadPoolExecutor)
+- **Subdomain permutation** (altdns-style: `{sub}-dev`, `dev-{sub}`,
+  `-staging`, `-test`, `-admin`, etc.) with resolve-verification -
+  only resolved names are kept.
+- Writes `extended_recon.json` summary into the recon directory.
+
+### Model additions
+`ScanResult` now has `asn_info`, `shodan_info`, `geo_info`, `http_versions`
+dict fields, properly declared on the dataclass.
+
+### Tests (109 passing, up from 96)
+- `test_sqli_xss.py`:
+  - SQLi: zero findings on clean baseline
+  - SQLi: zero findings when error signature pre-exists in baseline (FP guard)
+  - SQLi: triggers only when signature is new in response
+  - SQLi: finding carries `sqli` + engine + technique tags
+  - XSS: no finding when canary not reflected
+  - XSS: no finding when canary reflects but payload is HTML-encoded
+  - XSS: finding when payload survives unencoded
+- `test_recon_extended.py`: permutation generation, wordlist well-formed
+- `test_checks.py`: FamousCVEs method presence, XSS payload contexts
+
+### Files Added
+- `scanner/checks/sql_injection.py` (rewritten)
+- `scanner/checks/xss.py`
+- `scanner/checks/famous_cves.py`
+- `scanner/recon_extended.py`
+- `tests/test_sqli_xss.py`
+- `tests/test_recon_extended.py`
+
+### Totals
+- **27 vulnerability check classes** (up from 25)
+- **109 tests passing** (up from 96)
+- **5 output formats** (HTML/JSON/Markdown/SARIF/CSV)
+- **Recon surfaces:** WHOIS, DNS, AXFR, 6 subdomain sources (subfinder/amass/
+  assetfinder/findomain/sublist3r/crt.sh), reverse-IP, vhost, favicon mmh3,
+  Google dorks, nmap, masscan, whatweb, wafw00f, **ASN, Shodan InternetDB,
+  SPF/DMARC/DNSSEC, security.txt, HTTP/2/3, geolocation, DNS brute-force,
+  altdns permutations**.
+
 ## 3.3.0 (2026-10-03) - Scanner-self-security + SARIF + 3 more vuln classes
 
 Driven by the second round of audit findings (105 raw -> 45 confirmed).

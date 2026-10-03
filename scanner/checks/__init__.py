@@ -18,6 +18,8 @@ from .jwt_weakness import JWTWeaknessCheck
 from .deserialization import DeserializationCheck
 from .csp_cookies import CSPCookieCheck
 from .ldap_injection import LDAPInjectionCheck
+from .xss import XSSCheck
+from .famous_cves import FamousCVEsCheck
 from .nuclei_scan import NucleiScan
 from .nikto_scan import NiktoScan
 from .dirbrute import DirBruteCheck
@@ -45,6 +47,8 @@ ALL_CHECKS = [
     DeserializationCheck,
     CSPCookieCheck,
     LDAPInjectionCheck,
+    XSSCheck,
+    FamousCVEsCheck,
     NucleiScan,
     NiktoScan,
     DirBruteCheck,

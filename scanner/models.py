@@ -81,6 +81,10 @@ class ScanResult:
     cms_info: dict = field(default_factory=dict)        # host -> cms string
     found_params: dict = field(default_factory=dict)    # url -> [param names]
     google_dorks: list = field(default_factory=list)    # list[str]
+    asn_info: dict = field(default_factory=dict)        # ip -> {asn, prefix, country, ...}
+    shodan_info: dict = field(default_factory=dict)     # ip -> {ports, vulns, ...}
+    geo_info: dict = field(default_factory=dict)        # ip -> {country, city, org, ...}
+    http_versions: dict = field(default_factory=dict)   # host -> {h2, h3, tls_version}
 
     def sorted_findings(self) -> list:
         return sorted(self.findings, key=lambda f: f.sev_order())
