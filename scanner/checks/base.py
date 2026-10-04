@@ -42,6 +42,8 @@ class BaseCheck:
         self.findings: list[Finding] = []
         self.log = logging.getLogger(f"autoscan.checks.{self.name}")
         self._baseline_cache: dict[str, str] = {}
+        import threading as _threading
+        self._baseline_lock = _threading.Lock()
 
     # =====================================================================
     # Host selection helpers
@@ -81,6 +83,10 @@ class BaseCheck:
             args += ["-d", data]
         if with_status:
             args += ["-w", self.STATUS_SENTINEL]
+        # `--` separator so a URL/host beginning with `-` (crafted redirect
+        # target, attacker-controlled wordlist entry) cannot be re-parsed
+        # as a curl option.
+        args.append("--")
         args.append(url)
         return args
 
@@ -160,19 +166,40 @@ class BaseCheck:
     # =====================================================================
     @staticmethod
     def _url(base: str, param: str, value: str) -> str:
-        """Build a URL with a single URL-encoded query parameter."""
-        return f"{base}?{param}={urllib.parse.quote(value, safe='')}"
+        """Build a URL with a single URL-encoded query parameter.
+
+        Correctly extends an existing query string instead of producing
+        `?a=1?q=v`. Both the param NAME and value are URL-encoded so a
+        name containing `&`/`=`/`#` cannot corrupt the request.
+        """
+        parsed = urllib.parse.urlparse(base)
+        existing = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        existing.append((param, value))
+        new_query = urllib.parse.urlencode(existing, quote_via=urllib.parse.quote,
+                                            safe="")
+        return urllib.parse.urlunparse(parsed._replace(query=new_query))
 
     # =====================================================================
     # Baseline caching - 1 benign request per host, cached
     # =====================================================================
     def _baseline(self, host: str, timeout: int = 6) -> str:
-        """Return the benign baseline body for `host`, cached per instance."""
-        if host in self._baseline_cache:
-            return self._baseline_cache[host]
-        body = self._fetch(host, timeout=timeout)
-        self._baseline_cache[host] = body
-        return body
+        """Return the benign baseline body for `host`, cached per instance.
+
+        Thread-safe (shared across the check's worker pool) and does NOT
+        cache empty bodies - a transient failure must not poison every
+        later baseline comparison for the lifetime of the check.
+        """
+        cached = self._baseline_cache.get(host)
+        if cached:
+            return cached
+        with self._baseline_lock:
+            cached = self._baseline_cache.get(host)
+            if cached:
+                return cached
+            body = self._fetch(host, timeout=timeout)
+            if body:
+                self._baseline_cache[host] = body
+            return body or ""
 
     # =====================================================================
     # Status line parsing (used across checks)

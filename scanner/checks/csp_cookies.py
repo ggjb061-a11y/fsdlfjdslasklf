@@ -98,6 +98,10 @@ class CSPCookieCheck(BaseCheck):
 
         if missing:
             sev = "medium" if is_sensitive else "low"
+            # Strip the name=value pair before persisting - the finding is
+            # about missing flags, not the cookie's value, and the value may
+            # be a live session identifier.
+            flags_only = ";".join(parts[1:]) if len(parts) > 1 else ""
             self.findings.append(Finding(
                 severity=sev,
                 title=f"Cookie '{name}' missing flags: {', '.join(missing)}",
@@ -105,7 +109,7 @@ class CSPCookieCheck(BaseCheck):
                 detail=f"Cookie '{name}' lacks {', '.join(missing)}; sensitive cookies without these flags risk hijacking/CSRF",
                 source="cookie",
                 url=host,
-                evidence=cookie[:200],
+                evidence=f"name={name} flags={flags_only[:200]}",
             ))
 
         if name.startswith("__Host-") and ("secure" not in flags or "path=/" not in [p.lower() for p in parts]):

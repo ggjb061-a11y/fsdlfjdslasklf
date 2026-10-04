@@ -158,14 +158,29 @@ class TechAdaptiveCheck(BaseCheck):
                 tags=["laravel", "env-leak", "credentials-exposed"],
             ))
 
-        # /_ignition - Laravel debug page RCE vulnerable in <=8.4.2
+        # /_ignition - Laravel debug page RCE vulnerable in <=8.4.2.
+        # Require a Laravel/Ignition-specific marker, not just the English
+        # word "ignition" which trips on unrelated products and advisory text.
         status, body, _ = self._fetch(f"{base}/_ignition/execute-solution")
-        if status in (200, 405, 500) and "ignition" in body.lower():
+        body_lower = body.lower() if body else ""
+        strong = any(m in body_lower for m in (
+            "facade\\\\ignition",
+            "facade/ignition",
+            "runsolution",
+            "\"solution\":",
+            "ignitionexception",
+        ))
+        if status in (200, 405, 500) and strong:
             self.findings.append(Finding(
-                severity="critical",
+                severity="high",
                 title="Laravel Ignition debug page reachable (CVE-2021-3129)",
                 host=base,
-                detail="Ignition debug handler is reachable. CVE-2021-3129 allows unauth RCE on vulnerable versions.",
+                detail=(
+                    "Ignition debug handler is reachable with a Laravel/Ignition-"
+                    "specific response fingerprint. CVE-2021-3129 allows unauth "
+                    "RCE on vulnerable versions (<=8.4.2). Verify version before "
+                    "escalating to critical."
+                ),
                 source="tech_adaptive",
                 url=f"{base}/_ignition/execute-solution",
                 tags=["laravel", "cve-2021-3129", "rce-potential"],

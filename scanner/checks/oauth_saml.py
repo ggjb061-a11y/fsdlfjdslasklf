@@ -88,6 +88,27 @@ class OAuthSAMLCheck(BaseCheck):
         status, body, location = self._fetch(probe, follow=False)
         # If server redirects to our attacker URL, it accepts the uri
         if location and ATTACKER_CANARY in location:
+            # Strip code=/access_token=/id_token=/state= values before
+            # persisting - implicit-flow IdPs put live credentials in the
+            # Location fragment or query, and reports flow to shared systems.
+            try:
+                parsed = urllib.parse.urlparse(location)
+                query_pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+                redacted_q = [
+                    (k, "<redacted>" if k.lower() in {
+                        "code", "access_token", "id_token", "state",
+                        "token", "refresh_token", "assertion",
+                    } else v)
+                    for k, v in query_pairs
+                ]
+                safe_location = urllib.parse.urlunparse(
+                    parsed._replace(
+                        query=urllib.parse.urlencode(redacted_q),
+                        fragment="<redacted>" if parsed.fragment else "",
+                    )
+                )
+            except Exception:
+                safe_location = f"<redacted; ATTACKER_CANARY in Location>"
             self.findings.append(Finding(
                 severity="high",
                 title="OAuth redirect_uri wildcard (host not pinned)",
@@ -100,7 +121,7 @@ class OAuthSAMLCheck(BaseCheck):
                 source="oauth_saml",
                 url=probe,
                 tags=["oauth", "redirect-uri", "account-takeover"],
-                evidence=location,
+                evidence=safe_location,
             ))
 
     def _check_state_missing(self, authorize_url: str) -> None:

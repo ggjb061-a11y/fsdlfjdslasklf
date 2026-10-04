@@ -85,7 +85,7 @@ class SessionMgmtCheck(BaseCheck):
                     source="session_mgmt",
                     url=url,
                     tags=["session", "weak-entropy", f"cookie:{name}"],
-                    evidence=f"value={value[:80]!r} entropy={entropy:.2f}",
+                    evidence=f"value=<redacted len={len(value)}> entropy={entropy:.2f}",
                 ))
             # Secure / HttpOnly flags
             if is_https and "secure" not in flags:

@@ -190,7 +190,16 @@ class CrawlerModule:
     def _add_raw(self, url: str, source: str) -> None:
         if not url or not url.startswith("http"):
             return
-        if self.target.lower() not in url.lower():
+        # Proper host-suffix scope check: substring match let through
+        # 'evilexample.com', 'notexample.com', or any attacker URL whose
+        # query string merely mentions the target.
+        try:
+            import urllib.parse as _up
+            netloc = _up.urlparse(url).netloc.lower().split(":")[0]
+        except Exception:
+            return
+        tgt = self.target.lower()
+        if netloc != tgt and not netloc.endswith("." + tgt):
             return
         if url not in self.raw_urls:
             self.raw_urls[url] = source

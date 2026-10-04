@@ -142,8 +142,39 @@ def run(
     except PermissionError:
         return -3, "", f"permission denied: {cmd[0]}"
     except Exception as exc:
-        logger.debug(f"run({cmd}): {exc}")
+        logger.debug(f"run({_redact_argv(cmd)}): {exc}")
         return -4, "", str(exc)
+
+
+def _redact_argv(cmd: List[str]) -> List[str]:
+    """Return a shallow copy of cmd with Authorization/Cookie/-u values masked.
+
+    utils.run prepends auth material (Authorization: Bearer, Cookie, -u) to
+    every curl invocation. On any curl exception the raw argv would reach the
+    debug log, which is a real credential disclosure path.
+    """
+    out = []
+    i = 0
+    while i < len(cmd):
+        tok = cmd[i]
+        if tok == "-H" and i + 1 < len(cmd):
+            hdr = cmd[i + 1]
+            low = hdr.lower()
+            if low.startswith("authorization:") or low.startswith("cookie:") \
+                    or low.startswith("x-api-key:") or low.startswith("x-auth-token:"):
+                name = hdr.split(":", 1)[0]
+                out.extend([tok, f"{name}: <redacted>"])
+            else:
+                out.extend([tok, hdr])
+            i += 2
+            continue
+        if tok == "-u" and i + 1 < len(cmd):
+            out.extend([tok, "<redacted>"])
+            i += 2
+            continue
+        out.append(tok)
+        i += 1
+    return out
 
 
 # ─── Directory builder ────────────────────────────────────────────────────────

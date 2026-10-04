@@ -29,12 +29,16 @@ class XSSCheck(BaseCheck):
 
     CANARY = "xssmarker7x7"
 
+    # Each needle MUST include the canary so that minified JS already
+    # containing e.g. `;alert(` cannot look like a confirmed payload echo.
+    # The byte-exact match in step 3 then only fires when our full probe
+    # survived unencoded.
     PAYLOADS = [
-        ("html",      f"<script>alert({CANARY})</script>",        rb"<script>alert"),
-        ("html-img",  f"<img src=x onerror=alert({CANARY})>",     rb"<img src=x onerror"),
-        ("html-svg",  f"<svg/onload=alert({CANARY})>",            rb"<svg/onload"),
-        ("attr",      f"\" autofocus onfocus=alert({CANARY}) x=\"",  rb"onfocus=alert"),
-        ("js",        f"';alert({CANARY});//",                    rb";alert("),
+        ("html",      f"<script>alert({CANARY})</script>",        f"<script>alert({CANARY})".encode()),
+        ("html-img",  f"<img src=x onerror=alert({CANARY})>",     f"onerror=alert({CANARY})".encode()),
+        ("html-svg",  f"<svg/onload=alert({CANARY})>",            f"<svg/onload=alert({CANARY})".encode()),
+        ("attr",      f"\" autofocus onfocus=alert({CANARY}) x=\"",  f"onfocus=alert({CANARY})".encode()),
+        ("js",        f"';alert({CANARY});//",                    f";alert({CANARY})".encode()),
     ]
 
     def execute(self) -> list[Finding]:

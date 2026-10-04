@@ -87,6 +87,9 @@ class GraphQLDeepCheck(BaseCheck):
                     probe = json.dumps({"query": f"{{{field}{{id}}}}"})
                     s2, b2 = self._post_json(url, probe)
                     if b2 and '"data"' in b2 and '"errors"' not in b2:
+                        # Do NOT dump response bytes: by construction this is a
+                        # query for `secrets`/`apiKeys`/`passwords`/etc. and the
+                        # first 300 bytes are the leaked data themselves.
                         self.findings.append(Finding(
                             severity="high",
                             title=f"GraphQL unauthenticated sensitive query: {field}",
@@ -99,7 +102,7 @@ class GraphQLDeepCheck(BaseCheck):
                             url=url,
                             tags=["graphql", "unauthenticated", "sensitive",
                                   f"field:{field}"],
-                            evidence=b2[:300],
+                            evidence=f"field={field} status={s2} response_bytes={len(b2)}",
                         ))
 
         # Stage 2: Field-suggestion disclosure (works even without introspection)

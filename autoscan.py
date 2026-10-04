@@ -467,6 +467,10 @@ def scan_target(target: str, args: argparse.Namespace, resume_dir: str = None) -
 
     phase_banner(log, "PHASE 8 - GENERATING REPORT")
     formats = ["html", "json", "markdown", "sarif", "csv"] if args.format == "all" else [args.format]
+    # --fail-on reads summary.json; force JSON into the list so a user who
+    # asked only for HTML/Markdown still gets a working CI gate.
+    if getattr(args, "fail_on", None) and "json" not in formats:
+        formats = formats + ["json"]
     report_path = generate(result, formats=formats)
     counts = result.count_by_severity()
 
@@ -513,9 +517,35 @@ def main() -> None:
         except Exception:
             target_name = "resumed"
         print(f"  [*] Resuming scan at {args.resume}")
+        # Apply auth/proxy/rate-limit the same way the normal path does -
+        # a resumed run otherwise silently drops Authorization/Cookie
+        # headers and rate limiting, producing different (often 401/429)
+        # behavior from the original run.
         if args.proxy:
             set_proxy(args.proxy)
-        scan_target(target_name, args, resume_dir=str(base))
+        set_auth(
+            headers=args.header,
+            cookie=args.cookie,
+            bearer=args.bearer,
+            basic=args.basic_auth,
+        )
+        if args.rate_limit > 0:
+            set_rate_limit(args.rate_limit)
+        try:
+            scan_target(target_name, args, resume_dir=str(base))
+        except KeyboardInterrupt:
+            print(f"\n  [!] Interrupted during resumed scan; use --resume to continue.")
+            sys.exit(130)
+        except Exception as exc:
+            log = logging.getLogger("autoscan")
+            log.error(f"  [!] Resumed target failed: {exc}",
+                      exc_info=args.verbose)
+            print(f"  [!] Resumed target failed: {exc}")
+            sys.exit(1)
+        # Fall through to --fail-on logic below instead of sys.exit(0),
+        # so a resumed scan still enforces the severity gate.
+        if args.fail_on:
+            _severity_gate(args.fail_on, args.output, [target_name])
         sys.exit(0)
 
     targets: list[str] = []
@@ -537,7 +567,11 @@ def main() -> None:
         print(f"\n  [!] Targets ({len(targets)}): {', '.join(targets[:5])}"
               + (f" ... +{len(targets)-5} more" if len(targets) > 5 else ""))
         print("  [!] Scanning without authorization is ILLEGAL.\n")
-        ans = input("  Confirm you have authorization [yes/NO]: ").strip().lower()
+        try:
+            ans = input("  Confirm you have authorization [yes/NO]: ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print("\n  Aborted.")
+            sys.exit(130)
         if ans != "yes":
             print("  Aborted.")
             sys.exit(0)
@@ -584,6 +618,14 @@ def main() -> None:
         _severity_gate(args.fail_on, args.output, targets)
 
 
+def _target_safe_name(target: str) -> str:
+    """Match the sanitization scheme used in create_dirs."""
+    import re as _re
+    safe = _re.sub(r"[^a-zA-Z0-9_-]", "_", target)
+    safe = _re.sub(r"_+", "_", safe).strip("_")
+    return safe or "target"
+
+
 def _severity_gate(threshold: str, output_dir: str, targets: list) -> None:
     """Exit non-zero if any target produced a finding at or above the threshold."""
     order = ["critical", "high", "medium", "low", "info"]
@@ -592,7 +634,10 @@ def _severity_gate(threshold: str, output_dir: str, targets: list) -> None:
     worst_idx = len(order)
     scanned_root = Path(output_dir)
     for target in targets:
-        safe = target.replace("/", "_")
+        # Use the same sanitizer that create_dirs applies; the old
+        # target.replace("/", "_") produced a different name (dots kept)
+        # so the gate found no summaries and never failed the build.
+        safe = _target_safe_name(target)
         target_dir = scanned_root / safe
         if not target_dir.exists():
             continue

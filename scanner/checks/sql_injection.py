@@ -160,18 +160,32 @@ class SQLInjectionCheck(BaseCheck):
                 ))
                 return True
 
-        # Technique 3: Time-based blind (requires ≥4s delay for a 5s SLEEP)
+        # Technique 3: Time-based blind. Threshold is baseline-RELATIVE
+        # (baseline_time + 4s) so a legitimately slow endpoint whose p95 is
+        # ~5s does not fire. Sample baseline as the median of 3 benign shots
+        # to kill network-blip skew.
+        baseline_samples = []
+        for _ in range(3):
+            rc_b, _, el_b = self._fetch(self._url(base, param, "1"), timeout=6)
+            if rc_b == 0:
+                baseline_samples.append(el_b)
+        if baseline_samples:
+            import statistics as _stats
+            baseline_med = _stats.median(baseline_samples)
+        else:
+            baseline_med = baseline_time
+        time_threshold = baseline_med + 4.0
         for engine, payload in self.TIME_PAYLOADS:
-            # Confirm baseline is fast first
-            if baseline_time > 2.5:
+            # Skip entirely on already-slow endpoints to avoid long waits.
+            if baseline_med > 3.0:
                 break
             rc, body, elapsed = self._fetch(self._url(base, param, f"1{payload}"), timeout=10)
             if rc != 0:
                 continue
             # Verify with second shot to avoid network-blip FPs
-            if elapsed >= 4.5:
+            if elapsed >= time_threshold:
                 rc2, _, elapsed2 = self._fetch(self._url(base, param, f"1{payload}"), timeout=10)
-                if rc2 == 0 and elapsed2 >= 4.5:
+                if rc2 == 0 and elapsed2 >= time_threshold:
                     self.findings.append(Finding(
                         severity="critical",
                         title=f"SQL Injection (time-based blind, {engine}) via '{param}' [built-in]",
@@ -179,44 +193,65 @@ class SQLInjectionCheck(BaseCheck):
                         detail=(
                             f"Detector: AutoVulnScan built-in SQLi engine.\n"
                             f"Parameter '{param}' triggers a {engine} sleep: baseline "
-                            f"{baseline_time:.1f}s vs injected {elapsed:.1f}s / {elapsed2:.1f}s "
-                            f"(both ≥4.5s). Two consecutive confirmations reduce flake risk."
+                            f"median {baseline_med:.1f}s vs injected {elapsed:.1f}s / {elapsed2:.1f}s "
+                            f"(both >= {time_threshold:.1f}s = baseline+4s). "
+                            f"Two consecutive confirmations reduce flake risk."
                         ),
                         source="sqli",
                         url=self._url(base, param, f"1{payload}"),
                         tags=["sqli", "time-based", engine.lower(),
                               f"param:{param}", "detector:builtin"],
-                        evidence=f"baseline={baseline_time:.1f}s inject={elapsed:.1f}s re-check={elapsed2:.1f}s",
+                        evidence=f"baseline_med={baseline_med:.1f}s inject={elapsed:.1f}s re-check={elapsed2:.1f}s",
                     ))
                     return True
 
-        # Technique 4: UNION column enumeration (ORDER BY N -> error vs OK)
-        for col_count in range(1, 11):
-            payload = f"1' ORDER BY {col_count}-- -"
+        # Technique 4: UNION column enumeration (ORDER BY).
+        # Correct differential test: the SAME payload shape at col_count=1 must
+        # NOT trigger an error (there is always >=1 column), but a very large
+        # col_count SHOULD. A WAF/error-page that fires on ANY `-- -` payload
+        # trips both and is filtered out. The Generic bucket is skipped - raw
+        # English phrases like "database error" are too noisy to drive a
+        # critical finding (they appear in WAF block pages for every payload).
+        strong_engines = {k: v for k, v in self.ERROR_SIGNATURES.items()
+                           if k != "Generic"}
+
+        def _hits_at(col: int) -> set:
+            payload = f"1' ORDER BY {col}-- -"
             rc, body, _ = self._fetch(self._url(base, param, payload), timeout=6)
             if rc != 0 or not body:
-                continue
+                return set()
             body_lower = body.lower()
-            # Does OB <too-large> provoke a column-count error signature?
-            if col_count == 10:
-                for sigs in self.ERROR_SIGNATURES.values():
-                    for sig in sigs:
-                        if sig in body_lower and sig not in baseline_lower:
-                            self.findings.append(Finding(
-                                severity="high",
-                                title=f"SQL Injection (UNION probe) via '{param}' [built-in]",
-                                host=base,
-                                detail=(
-                                    f"Detector: AutoVulnScan built-in SQLi engine.\n"
-                                    f"ORDER BY column enumeration causes DB error at col_count={col_count}, "
-                                    f"suggesting the parameter is inside a UNION-compatible SELECT."
-                                ),
-                                source="sqli",
-                                url=self._url(base, param, payload),
-                                tags=["sqli", "union-based", f"param:{param}", "detector:builtin"],
-                                evidence=f"ORDER BY {col_count} -> {sig}",
-                            ))
-                            return True
+            hits = set()
+            for sigs in strong_engines.values():
+                for sig in sigs:
+                    if sig in body_lower and sig not in baseline_lower:
+                        hits.add(sig)
+            return hits
+
+        hits_low = _hits_at(1)
+        hits_high = _hits_at(10)
+        # Signatures that appear at col=10 but NOT at col=1 are UNION-specific.
+        diff = hits_high - hits_low
+        if diff:
+            sig = sorted(diff)[0]
+            self.findings.append(Finding(
+                severity="high",
+                title=f"SQL Injection (UNION probe) via '{param}' [built-in]",
+                host=base,
+                detail=(
+                    f"Detector: AutoVulnScan built-in SQLi engine.\n"
+                    f"ORDER BY column enumeration differentiates between "
+                    f"col_count=1 (no error) and col_count=10 (error "
+                    f"'{sig}'), isolating a UNION-compatible SELECT. "
+                    f"A WAF that errored on any payload would have tripped "
+                    f"both probes and been filtered out."
+                ),
+                source="sqli",
+                url=self._url(base, param, "1' ORDER BY 10-- -"),
+                tags=["sqli", "union-based", f"param:{param}", "detector:builtin"],
+                evidence=f"col=1 -> clean | col=10 -> {sig}",
+            ))
+            return True
 
         return False
 

@@ -103,6 +103,9 @@ class OpenAPIFuzzerCheck(BaseCheck):
             return
         m = self.SENSITIVE_RESPONSE_SIGNALS.search(body)
         if m:
+            # Do NOT persist response body bytes: the first 300 bytes of a
+            # response matching a secret-shaped regex is almost by definition
+            # the leaked credential. Record only the signal and size.
             self.findings.append(Finding(
                 severity="high",
                 title=f"OpenAPI unauthenticated sensitive data: {url}",
@@ -114,7 +117,7 @@ class OpenAPIFuzzerCheck(BaseCheck):
                 source="openapi_fuzzer",
                 url=url,
                 tags=["openapi", "unauthenticated", "sensitive-data"],
-                evidence=body[:300],
+                evidence=f"signal={m.group(0)} response_bytes={len(body)}",
             ))
 
     def _probe_endpoints(self, spec: dict) -> None:

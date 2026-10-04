@@ -136,10 +136,20 @@ class JSAnalyzer:
                         s.pattern_name == name and s.match == val
                         for s in self.secrets
                     ):
+                        # Mask the matched secret: keep a short prefix/suffix
+                        # plus a sha256 fingerprint, never the live token.
+                        # Reports (SARIF, JSON) often flow to shared dashboards.
+                        import hashlib
+                        fp = hashlib.sha256(val.encode(errors="replace")).hexdigest()[:12]
+                        if len(val) > 12:
+                            masked = f"{val[:4]}...{val[-4:]}"
+                        else:
+                            masked = "<redacted>"
+                        redacted = f"{masked} (sha256_prefix={fp} len={len(val)})"
                         self.secrets.append(JSSecret(
                             file_url=url,
                             pattern_name=name,
-                            match=val[:120],  # truncate long matches
+                            match=redacted,
                             line=i,
                             severity=sev,
                         ))
@@ -147,10 +157,10 @@ class JSAnalyzer:
                             severity=sev,
                             title=f"Secret: {name}",
                             host=url,
-                            detail=f"Found at line {i}: {val[:80]}",
+                            detail=f"Found at line {i} (value redacted; see sha256 prefix in evidence)",
                             source="js_analyzer",
                             url=url,
-                            evidence=val[:120],
+                            evidence=redacted,
                         ))
 
         # Endpoint extraction (narrow regex)

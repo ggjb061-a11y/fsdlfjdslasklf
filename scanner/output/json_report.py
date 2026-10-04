@@ -45,6 +45,10 @@ def generate_json(result) -> str:
         "waf": result.waf,
     }
     path = f"{result.base_dir}/06_reports/summary.json"
-    Path(path).write_text(json.dumps(summary, indent=2, default=str, ensure_ascii=False))
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(
+        json.dumps(summary, indent=2, default=str, ensure_ascii=False),
+        encoding="utf-8",
+    )
     logger.info(f"  JSON report: {path}")
     return path

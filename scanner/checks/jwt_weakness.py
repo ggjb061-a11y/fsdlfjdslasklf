@@ -75,6 +75,10 @@ class JWTWeaknessCheck(BaseCheck):
                 kid = header.get("kid")
 
                 if alg == "none":
+                    # Only persist the header portion. The payload carries
+                    # sub/email/exp/scope claims which are confidential even
+                    # when the token itself is unverifiable.
+                    header_part = match.split(".")[0]
                     self.findings.append(Finding(
                         severity="critical",
                         title="JWT alg=none Accepted",
@@ -82,20 +86,36 @@ class JWTWeaknessCheck(BaseCheck):
                         detail="Token issued with alg=none - signature not verified",
                         source="jwt",
                         url=base,
-                        evidence=match[:60] + "...",
+                        evidence=f"header={header_part} (payload redacted)",
                     ))
 
                 if alg == "hs256":
                     weak = self._try_weak_secret(match)
                     if weak is not None:
+                        # Never emit the cracked secret itself: SARIF / JSON
+                        # reports frequently flow to shared dashboards. Store
+                        # only a fingerprint so the operator can reproduce
+                        # locally without the live key leaking.
+                        import hashlib
+                        if weak:
+                            fp = hashlib.sha256(weak.encode()).hexdigest()[:12]
+                            evidence = f"secret_sha256_prefix={fp} len={len(weak)}"
+                        else:
+                            fp = "<empty-string>"
+                            evidence = "secret=<empty-string> len=0"
                         self.findings.append(Finding(
                             severity="critical",
-                            title=f"JWT HS256 Weak Secret Found: '{weak or '<empty>'}'",
+                            title=f"JWT HS256 Weak Secret Cracked (fp={fp})",
                             host=base,
-                            detail=f"Token signed with trivially guessable secret",
+                            detail=(
+                                "Token signed with a trivially guessable secret. "
+                                "The secret itself is NOT emitted in this finding; "
+                                "re-run jwt_weakness against the token to recover it "
+                                "in the operator's own environment."
+                            ),
                             source="jwt",
                             url=base,
-                            evidence=f"secret={weak!r}",
+                            evidence=evidence,
                         ))
 
                 if kid and (".." in str(kid) or "/" in str(kid)):

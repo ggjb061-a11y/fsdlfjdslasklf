@@ -64,6 +64,10 @@ def generate_sarif(result) -> str:
     }
 
     path = f"{result.base_dir}/06_reports/report.sarif"
-    Path(path).write_text(json.dumps(sarif, indent=2, ensure_ascii=False))
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(
+        json.dumps(sarif, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
     logger.info(f"  SARIF report: {path}")
     return path
