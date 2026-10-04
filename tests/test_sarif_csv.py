@@ -56,7 +56,29 @@ class TestCSV(unittest.TestCase):
             content = Path(path).read_text()
             self.assertIn("SQL Injection", content)
             self.assertIn("critical", content)
-            self.assertIn("severity,title", content.splitlines()[0])
+            # Header now uses QUOTE_ALL so the test must match a quoted header.
+            self.assertIn("severity", content.splitlines()[0])
+            self.assertIn("title", content.splitlines()[0])
+
+    def test_csv_injection_prefix_is_neutralized(self):
+        from scanner.models import Finding, ScanResult
+        from scanner.utils import create_dirs
+        from scanner.output.csv_report import generate_csv
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            dirs = create_dirs(tmp, "example.com")
+            r = ScanResult(target="example.com", scan_date="2026-01-01", base_dir=dirs["base"])
+            # An attacker-controlled finding title that starts with `=`
+            # would be executed as a formula on open in Excel/Sheets.
+            r.findings = [
+                Finding("critical", "=cmd|'/c calc'!A1", "evil.example",
+                        "attacker-controlled", "nuclei"),
+            ]
+            path = generate_csv(r)
+            content = Path(path).read_text()
+            # The cell is quoted, and the leading `=` is replaced by `'=`.
+            self.assertIn("\"'=cmd", content)
+            self.assertNotIn("\"=cmd", content)
 
 
 if __name__ == "__main__":

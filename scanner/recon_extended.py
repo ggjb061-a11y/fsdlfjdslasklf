@@ -138,20 +138,40 @@ def analyze_mail_security(domain: str) -> list[Finding]:
         ))
     else:
         spf = spf_records[0]
-        if "+all" in spf.lower():
+        # Tokenize mechanisms and inspect the FINAL `all` qualifier.
+        # Per RFC 7208, no qualifier means `+` (pass), so a record ending
+        # in a bare `all` is equivalent to `+all`.
+        tokens = [t for t in spf.split() if t]
+        final_all = None
+        for tok in tokens:
+            tl = tok.lower()
+            if tl == "all" or tl.endswith(" all"):
+                final_all = "+"
+            elif tl in ("+all", "-all", "~all", "?all"):
+                final_all = tl[0]
+        if final_all == "+":
             findings.append(Finding(
                 severity="medium",
                 title="SPF +all - permits spoofing from any sender",
                 host=domain,
-                detail=f"SPF record contains +all: {spf}. Enables anyone to send mail as this domain.",
+                detail=f"SPF record resolves to +all (explicit or bare `all`): {spf}. Enables anyone to send mail as this domain.",
                 source="mail_security", evidence=spf,
             ))
-        elif "?all" in spf.lower():
+        elif final_all == "?":
             findings.append(Finding(
                 severity="info",
                 title="SPF ?all - neutral policy",
                 host=domain,
                 detail=f"SPF ?all leaves receivers to decide: {spf}",
+                source="mail_security", evidence=spf,
+            ))
+        # RFC 7208 §5.5 discourages the `ptr` mechanism (DoS + privacy risk).
+        if re.search(r"(?:^|\s)[+\-~?]?ptr(?:$|[\s:])", spf, re.IGNORECASE):
+            findings.append(Finding(
+                severity="low",
+                title="SPF uses discouraged `ptr` mechanism",
+                host=domain,
+                detail=f"SPF record contains `ptr`, deprecated by RFC 7208 §5.5: {spf}",
                 source="mail_security", evidence=spf,
             ))
 
@@ -174,7 +194,9 @@ def analyze_mail_security(domain: str) -> list[Finding]:
         ))
     else:
         dmarc = dmarc_records[0]
-        if re.search(r"p=none", dmarc, re.IGNORECASE):
+        # Boundary-anchored match on the `p=` tag so `sp=none` (subdomain
+        # policy) does not mis-flag a domain whose main policy is reject.
+        if re.search(r"(?:^|;\s*)p\s*=\s*none\b", dmarc, re.IGNORECASE):
             findings.append(Finding(
                 severity="low",
                 title="DMARC policy is p=none",

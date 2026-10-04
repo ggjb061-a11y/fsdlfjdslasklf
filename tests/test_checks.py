@@ -236,7 +236,12 @@ class TestConstants(unittest.TestCase):
     def test_checks_use_constant_canary(self):
         from scanner.constants import ATTACKER_CANARY
         from scanner.checks import cors, open_redirect, host_header
-        self.assertIn("ATTACKER_CANARY", cors.__dict__ | {"ATTACKER_CANARY": None})
+        for mod in (cors, open_redirect, host_header):
+            self.assertIn(
+                "ATTACKER_CANARY", mod.__dict__,
+                f"{mod.__name__} must import ATTACKER_CANARY from scanner.constants",
+            )
+            self.assertEqual(mod.ATTACKER_CANARY, ATTACKER_CANARY)
 
 
 class TestBaseCheck(unittest.TestCase):

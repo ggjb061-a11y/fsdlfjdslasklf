@@ -25,19 +25,67 @@ def _h3(s: str) -> str:
     return f"\n### {s}\n\n"
 
 
+def _md_cell(v) -> str:
+    """Escape a value for inclusion in a Markdown table cell.
+
+    Backticks, pipes, and newlines must be neutralized so an attacker-
+    controlled finding title/evidence cannot break out of its cell or
+    turn into a `<script>` tag when the Markdown is rendered on GitHub /
+    Slack / Confluence. The truncation happens BEFORE escaping so a cut
+    does not land inside an escape sequence.
+    """
+    s = "" if v is None else str(v)
+    s = s[:200]
+    s = s.replace("\\", "\\\\")
+    s = s.replace("|", "\\|")
+    s = s.replace("`", "\\`")
+    s = s.replace("\r", " ").replace("\n", " ")
+    s = s.replace("<", "&lt;").replace(">", "&gt;")
+    return s
+
+
+def _md_link_target(url: str) -> str:
+    """Percent-encode `(` `)` `<` `>` whitespace so a URL cannot break
+    out of Markdown link syntax."""
+    if not url:
+        return "#"
+    return (
+        url.replace("(", "%28")
+           .replace(")", "%29")
+           .replace("<", "%3C")
+           .replace(">", "%3E")
+           .replace(" ", "%20")
+    )
+
+
 def _table(headers: list, rows: list) -> str:
     if not rows:
         return "_No data._\n\n"
-    out = "| " + " | ".join(headers) + " |\n"
+    out = "| " + " | ".join(_md_cell(h) for h in headers) + " |\n"
     out += "| " + " | ".join(["---"] * len(headers)) + " |\n"
     for row in rows:
-        safe = [str(c).replace("|", "\\|").replace("\n", " ")[:200] for c in row]
-        out += "| " + " | ".join(safe) + " |\n"
+        out += "| " + " | ".join(_md_cell(c) for c in row) + " |\n"
     return out + "\n"
 
 
 def _code_block(content: str, lang: str = "") -> str:
-    return f"```{lang}\n{content}\n```\n\n"
+    # Pick a fence length longer than the longest run of backticks in the
+    # content, so a line like ``` inside the content cannot close the
+    # block early and let attacker-controlled text escape into Markdown.
+    s = "" if content is None else str(content)
+    longest = 0
+    i = 0
+    while i < len(s):
+        if s[i] == "`":
+            j = i
+            while j < len(s) and s[j] == "`":
+                j += 1
+            longest = max(longest, j - i)
+            i = j
+        else:
+            i += 1
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}{lang}\n{s}\n{fence}\n\n"
 
 
 def generate_markdown(result) -> str:
@@ -137,20 +185,24 @@ def generate_markdown(result) -> str:
         login = [u for u in result.urls if u.is_login]
         sensitive = [u for u in result.urls if u.is_sensitive_file]
         api = [u for u in result.urls if u.is_api]
+        def _link_line(u):
+            # Escape text with _md_cell; percent-encode the target so a
+            # URL containing `)` / whitespace cannot break the link.
+            return f"- [{_md_cell(u.url)}](<{_md_link_target(u.url)}>) `{u.status or ''}`\n"
         if login:
             md.append(_h3(f"Login/Auth Pages ({len(login)})"))
             for u in login[:30]:
-                md.append(f"- [{u.url}]({u.url}) `{u.status or ''}`\n")
+                md.append(_link_line(u))
             md.append("\n")
         if sensitive:
             md.append(_h3(f"Sensitive Files ({len(sensitive)})"))
             for u in sensitive[:30]:
-                md.append(f"- [{u.url}]({u.url}) `{u.status or ''}`\n")
+                md.append(_link_line(u))
             md.append("\n")
         if api:
             md.append(_h3(f"API Endpoints ({len(api)})"))
             for u in api[:30]:
-                md.append(f"- [{u.url}]({u.url}) `{u.status or ''}`\n")
+                md.append(_link_line(u))
             md.append("\n")
 
     endpoints = getattr(result, "js_endpoints", [])

@@ -411,8 +411,19 @@ class CrawlerModule:
                     per_host[host] = per_host.get(host, 0) + 1
                     # Extract and queue
                     found = self._extract_urls_from_body(body, url)
+                    tgt_lower = self.target.lower()
                     for u in found:
                         self._add_raw(u, "deep-crawl")
+                        # Deep-crawl queue needs its own scope gate; _add_raw
+                        # only guards storage. Without this check, a crawled
+                        # external link (CDN, analytics, attacker-redirect)
+                        # would be fetched and its body parsed.
+                        try:
+                            u_netloc = urllib.parse.urlparse(u).netloc.lower().split(":")[0]
+                        except Exception:
+                            continue
+                        if u_netloc != tgt_lower and not u_netloc.endswith("." + tgt_lower):
+                            continue
                         if (depth + 1 <= self.DEEP_CRAWL_DEPTH
                             and u not in visited
                             and per_host.get(urllib.parse.urlparse(u).netloc, 0)

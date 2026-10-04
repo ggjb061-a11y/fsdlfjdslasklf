@@ -260,7 +260,27 @@ class PassiveModule:
     def _emails(self) -> None:
         """Extract email addresses from page source and common pages."""
         hosts = self.live_hosts[:5] or [f"https://{self.target}"]
-        email_re = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
+        # Boundary-anchored so an asset path like 'npm i foo@bar.io' or
+        # 'user@2.min.js' does not match. Rejects local parts that start
+        # with a punctuation character.
+        email_re = re.compile(
+            r"(?<![A-Za-z0-9._%+\-])"
+            r"[A-Za-z0-9][A-Za-z0-9._%+\-]{0,62}"
+            r"@[A-Za-z0-9][A-Za-z0-9.\-]{0,251}"
+            r"\.[A-Za-z]{2,24}"
+            r"(?![A-Za-z0-9.\-])"
+        )
+        # Asset extensions that should never be mistaken for emails.
+        _ASSET_SUFFIX = (
+            ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico",
+            ".bmp", ".avif", ".css", ".js", ".map",
+            ".woff", ".woff2", ".ttf", ".eot", ".otf",
+            ".min.js", ".min.css", ".bundle.js",
+        )
+        _PLACEHOLDER_DOMAINS = (
+            "example.com", "example.org", "example.net",
+            "test.com", "localhost", "domain.com", "mail.com",
+        )
         all_emails: set[str] = set()
 
         pages = ["", "/contact", "/about", "/team", "/impressum", "/privacy"]
@@ -270,9 +290,19 @@ class PassiveModule:
                     ["curl", "-sL", "--max-time", "10", f"{base}{page}"],
                     timeout=15,
                 )
-                if rc == 0 and body:
-                    found = email_re.findall(body)
-                    all_emails.update(e for e in found if not e.endswith((".png", ".jpg", ".gif")))
+                if rc != 0 or not body:
+                    continue
+                for e in email_re.findall(body):
+                    el = e.lower()
+                    if el.endswith(_ASSET_SUFFIX):
+                        continue
+                    try:
+                        _, dom = el.rsplit("@", 1)
+                    except ValueError:
+                        continue
+                    if dom in _PLACEHOLDER_DOMAINS:
+                        continue
+                    all_emails.add(e)
 
         self.emails = sorted(all_emails)
         if self.emails:

@@ -82,9 +82,58 @@ class FormFuzzerCheck(BaseCheck):
                               "inputs": inputs})
         return forms
 
+    # Form action/name tokens that imply a state-changing operation we must
+    # NOT weaponize by fuzzing - submitting them would delete data, send
+    # money, log the user out, or trigger irreversible side effects.
+    _DESTRUCTIVE_RE = re.compile(
+        r"(?i)(?:^|/|[?&_-])(?:delete|destroy|remove|drop|purge|wipe|"
+        r"logout|signout|sign-out|log-out|transfer|pay|checkout|charge|"
+        r"cancel|unsubscribe|revoke|disable|deactivate|suspend|close|"
+        r"ban|kick|resetpassword|password-reset|changepassword)(?:$|[/?&_-])"
+    )
+    _CSRF_FIELD_RE = re.compile(
+        r"(?i)(csrf|xsrf|authenticity|anti.?forgery|request.?verification|"
+        r"__requestverification|nonce)"
+    )
+
+    def _is_destructive(self, form: dict) -> bool:
+        action = (form.get("action") or "").lower()
+        if self._DESTRUCTIVE_RE.search(action):
+            return True
+        for name, _t, _v in form.get("inputs", []):
+            if self._DESTRUCTIVE_RE.search((name or "").lower()):
+                return True
+        return False
+
     def _fuzz_form(self, form: dict, base_url: str) -> None:
-        # Build baseline + payload submissions
-        baseline_data = {name: value for name, _t, value in form["inputs"]}
+        # Destructive-action guardrail: skip forms whose action/name
+        # suggests delete/logout/transfer/pay/etc. so the fuzzer does not
+        # trigger real side effects on the target.
+        if self._is_destructive(form):
+            self.log.debug(
+                f"  form_fuzzer: skipping destructive form {form.get('action')}"
+            )
+            return
+        # Build baseline + payload submissions. Drop hidden CSRF tokens so
+        # we neither leak nor re-use a valid anti-CSRF token against a
+        # state-changing endpoint; a protected form with a token present
+        # on a POST is skipped entirely as a safety measure.
+        is_post = (form.get("method") or "").lower() == "post"
+        has_csrf_token = any(
+            self._CSRF_FIELD_RE.search((n or ""))
+            for n, _t, _v in form.get("inputs", [])
+        )
+        if is_post and has_csrf_token:
+            self.log.debug(
+                f"  form_fuzzer: skipping CSRF-protected POST form "
+                f"{form.get('action')}"
+            )
+            return
+        baseline_data = {
+            name: value
+            for name, _t, value in form["inputs"]
+            if not self._CSRF_FIELD_RE.search(name or "")
+        }
         if not baseline_data:
             return
         baseline_body, baseline_time = self._submit(

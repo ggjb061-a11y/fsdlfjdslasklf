@@ -13,29 +13,42 @@ logger = logging.getLogger("autoscan.js")
 
 # ─── Secret patterns ──────────────────────────────────────────────────────────
 # (name, regex, severity)
+#
+# Severity reflects REAL risk, not pattern-match presence:
+#   * Live production secrets (sk_live, AWS keys, GitHub tokens, private
+#     keys): critical
+#   * Server-side-only credentials paired with a context word: high
+#   * HTTP-referrer-restricted browser keys (AIza... in frontend JS,
+#     Firebase URL, S3 bucket URL) and Stripe TEST keys: info/low -
+#     these are shipped to the browser on purpose and Stripe explicitly
+#     documents test keys as non-sensitive.
+#   * Twilio SID is a public identifier (paired with an auth token for
+#     actual secrets), so low until a token is nearby.
+#
+# Regexes are anchored with word boundaries (\b or lookarounds) so that
+# cache-busting content hashes and minified identifiers don't trigger.
 SECRET_PATTERNS = [
-    ("AWS Access Key",        r"AKIA[0-9A-Z]{16}",                             "critical"),
+    ("AWS Access Key",        r"\bAKIA[0-9A-Z]{16}\b",                         "critical"),
     ("AWS Secret Key",        r"(?i)aws.{0,30}secret.{0,30}['\"][0-9a-z/+]{40}['\"]", "critical"),
-    ("GitHub Token",          r"ghp_[A-Za-z0-9]{36}",                          "critical"),
-    ("GitHub OAuth",          r"gho_[A-Za-z0-9]{36}",                          "critical"),
-    ("Google API Key",        r"AIza[0-9A-Za-z\-_]{35}",                       "high"),
-    ("Slack Token",           r"xox[baprs]-[0-9A-Za-z\-]+",                    "high"),
+    ("GitHub Token",          r"\bghp_[A-Za-z0-9]{36}\b",                      "critical"),
+    ("GitHub OAuth",          r"\bgho_[A-Za-z0-9]{36}\b",                      "critical"),
+    ("Google API Key",        r"\bAIza[0-9A-Za-z\-_]{35}\b",                   "low"),
+    ("Slack Token",           r"\bxox[baprs]-[0-9A-Za-z\-]+",                  "high"),
     ("Slack Webhook",         r"https://hooks\.slack\.com/services/[A-Z0-9]+/[A-Z0-9]+/[A-Za-z0-9]+", "high"),
-    ("Firebase URL",          r"https://[a-z0-9\-]+\.firebaseio\.com",         "medium"),
+    ("Firebase URL",          r"https://[a-z0-9\-]+\.firebaseio\.com",         "info"),
     ("Heroku API Key",        r"(?i)heroku.{0,30}[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}", "high"),
-    ("Stripe Key (live)",     r"sk_live_[0-9a-zA-Z]{24,}",                     "critical"),
-    ("Stripe Key (test)",     r"sk_test_[0-9a-zA-Z]{24,}",                     "medium"),
-    ("Twilio SID",            r"AC[0-9a-fA-F]{32}",                            "high"),
-    ("Mailgun Key",           r"key-[0-9a-zA-Z]{32}",                          "high"),
-    ("SendGrid Key",          r"SG\.[a-zA-Z0-9_\-]{22}\.[a-zA-Z0-9_\-]{43}",  "high"),
-    ("JWT Token",             r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+", "medium"),
+    ("Stripe Key (live)",     r"\bsk_live_[0-9a-zA-Z]{24,}\b",                 "critical"),
+    ("Stripe Key (test)",     r"\bsk_test_[0-9a-zA-Z]{24,}\b",                 "info"),
+    ("Twilio SID",            r"(?<![A-Za-z0-9])AC[0-9a-f]{32}(?![A-Za-z0-9])", "low"),
+    ("Mailgun Key",           r"(?<![A-Za-z0-9_\-])key-[0-9a-zA-Z]{32}(?![A-Za-z0-9_\-])", "high"),
+    ("SendGrid Key",          r"\bSG\.[a-zA-Z0-9_\-]{22}\.[a-zA-Z0-9_\-]{43}\b", "high"),
+    ("JWT Token",             r"\beyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\b", "info"),
     ("Private Key Header",    r"-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY",   "critical"),
     ("Generic Password",      r"(?i)(password|passwd|pwd)\s*[=:]\s*['\"][^'\"]{6,}['\"]", "high"),
-    ("Generic Secret",        r"(?i)(secret|token|apikey|api_key)\s*[=:]\s*['\"][^'\"]{8,}['\"]", "medium"),
+    ("Generic Secret",        r"(?i)\b(secret|apikey|api_key|access_token|private_key)\s*[=:]\s*['\"][A-Za-z0-9+/=_\-]{16,}['\"]", "medium"),
     ("Basic Auth in URL",     r"https?://[^:@\s]+:[^:@\s]+@[^/\s]+",          "high"),
-    ("S3 Bucket URL",         r"https?://[a-z0-9\-]+\.s3[\.\-][a-z0-9\-]*\.amazonaws\.com", "medium"),
+    ("S3 Bucket URL",         r"https?://[a-z0-9\-]+\.s3[\.\-][a-z0-9\-]*\.amazonaws\.com", "info"),
     ("Internal IP",           r"(?<!\d)(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3})(?!\d)", "low"),
-    ("Email Address",         r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", "info"),
 ]
 
 COMPILED = [(name, re.compile(pat), sev) for name, pat, sev in SECRET_PATTERNS]
@@ -57,7 +70,7 @@ LINKFINDER_RE = re.compile(
          [a-zA-Z]{2,}[^"']{0,})                           # TLD + path
         |
         ((?:/|\.\./|\./)                                  # or relative path
-         [^"'><,;| *()(%%$^/\\\[\]]                        # not JS/HTML chars
+         [^"'><,;| *()%$^/\\\[\]]                          # not JS/HTML chars
          [^"'><,;|()]{1,})                                 # not special chars
         |
         ([a-zA-Z0-9_\-/]{1,}/                             # path with slash
