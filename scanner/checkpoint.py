@@ -58,8 +58,12 @@ class CheckpointManager:
             self.state["phases_done"].append(phase)
         if data:
             self.state["data"][phase] = self._serializable(data)
+        # Atomic write: tmp + rename, so SIGINT between phases cannot
+        # leave a half-written checkpoint behind.
         try:
-            self.path.write_text(json.dumps(self.state, indent=2, default=str))
+            tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+            tmp.write_text(json.dumps(self.state, indent=2, default=str))
+            tmp.replace(self.path)
         except Exception as exc:
             logger.warning(f"  Could not save checkpoint: {exc}")
 
