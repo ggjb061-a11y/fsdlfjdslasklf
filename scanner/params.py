@@ -120,32 +120,62 @@ class ParamDiscovery:
             base_urls = set(self.live_hosts[:10])
 
         canary = "autoscan7x7probe"
+        import re as _re
+
+        def _fetch_with_status(url: str, timeout: int = 8) -> tuple[int, str]:
+            """Return (http_status, body). Status 0 means fetch failed."""
+            rc, body, _ = run(
+                ["curl", "-sL", "--max-time", str(timeout),
+                 "-w", "\n__PARAMS_STATUS__:%{http_code}", url],
+                timeout=timeout + 4,
+            )
+            if rc != 0 or not body:
+                return 0, ""
+            m = _re.search(r"__PARAMS_STATUS__:(\d+)\s*$", body)
+            if m:
+                return int(m.group(1)), body[:m.start()]
+            return 0, body
 
         def _test_url(base: str) -> tuple[str, list]:
             reflected = []
-            # Get baseline response length
-            rc, baseline, _ = run(
-                ["curl", "-sL", "--max-time", "8", base],
-                timeout=12,
-            )
-            if rc != 0:
+            # Sample the baseline 3 times to measure natural variance.
+            # Dynamic pages (CSRF tokens, timestamps, build hashes) differ
+            # from themselves by more than 50 bytes on refetch, which the
+            # old single-sample code mistook for parameter-induced change.
+            samples = []
+            base_status = 0
+            for _ in range(3):
+                st, body = _fetch_with_status(base, timeout=8)
+                if st:
+                    samples.append((st, body))
+                    base_status = st
+            if len(samples) < 2:
                 return base, []
-            base_len = len(baseline)
+            base_len = len(samples[0][1])
+            lengths = [len(b) for _s, b in samples]
+            natural_variance = max(lengths) - min(lengths)
+            # Require diff > max(variance*2, 50, 2% of body) so neither a
+            # noisy large page nor a tiny page produces a flood of FPs.
+            length_floor = max(50, natural_variance * 2, int(base_len * 0.02))
+
+            # Case-insensitive canary check, so a server that normalizes case
+            # (uppercase in a 'echo back' error) still matches.
+            canary_bytes = canary.lower().encode()
 
             for param in COMMON_PARAMS:
                 test_url = f"{base}{'&' if '?' in base else '?'}{param}={canary}"
-                rc, body, _ = run(
-                    ["curl", "-sL", "--max-time", "5", test_url],
-                    timeout=8,
-                )
-                if rc != 0 or not body:
+                st, body = _fetch_with_status(test_url, timeout=5)
+                if not st or not body:
                     continue
+                # Only consider the body-length heuristic when both responses
+                # share the same 2xx/3xx class; otherwise a 404 or WAF-block
+                # page would look 'accepted' for every param.
+                same_class = (st // 100) == (base_status // 100)
 
-                # Check if param is reflected in response (indicates it's accepted)
-                if canary in body:
+                # Reflection check (robust to case changes).
+                if canary_bytes in body.encode(errors="replace").lower():
                     reflected.append(param)
-                elif abs(len(body) - base_len) > 50:
-                    # Response changed significantly – param is likely processed
+                elif same_class and abs(len(body) - base_len) > length_floor:
                     reflected.append(param)
 
             return base, reflected

@@ -17,31 +17,38 @@ class NiktoScan(BaseCheck):
     description = "Run Nikto web server vulnerability scanning"
 
     def _normalize_vulns(self, data) -> list[dict]:
-        """Return a flat list of vulnerability dicts regardless of input shape."""
+        """Return a flat list of vulnerability dicts regardless of input shape.
+
+        Nikto JSON ships in three shapes:
+          * modern per-host list:  [{host, vulnerabilities: [...]}, ...]
+          * legacy single-host:    {host, vulnerabilities: [...]}
+          * flat list of findings: [{id, msg, url}, ...]
+        The flat shape must be handled OUTSIDE the `vulnerabilities` branch
+        because an entry with no `vulnerabilities` key still returns `[]`
+        from `.get(...)`, which is a list and used to swallow the entry.
+        """
         out: list[dict] = []
-        # Case 1: list of per-host objects (modern nikto)
         if isinstance(data, list):
             for entry in data:
-                if isinstance(entry, dict):
-                    host_ctx = {k: entry.get(k) for k in ("host", "ip", "port")}
-                    vulns = entry.get("vulnerabilities", [])
-                    if isinstance(vulns, list):
-                        for v in vulns:
-                            if isinstance(v, dict):
-                                merged = {**host_ctx, **v}
-                                out.append(merged)
-                    elif entry.get("id") or entry.get("msg"):
-                        # Flat vulnerability entry
-                        out.append(entry)
-        # Case 2: dict with vulnerabilities inside
+                if not isinstance(entry, dict):
+                    continue
+                host_ctx = {k: entry.get(k) for k in ("host", "ip", "port")}
+                # Nested shape: has `vulnerabilities` list
+                if isinstance(entry.get("vulnerabilities"), list):
+                    for v in entry["vulnerabilities"]:
+                        if isinstance(v, dict):
+                            out.append({**host_ctx, **v})
+                    continue
+                # Flat shape: the entry itself IS a vulnerability
+                if entry.get("id") or entry.get("msg") or entry.get("description"):
+                    out.append(entry)
         elif isinstance(data, dict):
             host_ctx = {k: data.get(k) for k in ("host", "ip", "port")}
             vulns = data.get("vulnerabilities", [])
             if isinstance(vulns, list):
                 for v in vulns:
                     if isinstance(v, dict):
-                        merged = {**host_ctx, **v}
-                        out.append(merged)
+                        out.append({**host_ctx, **v})
         return out
 
     @staticmethod
@@ -83,7 +90,13 @@ class NiktoScan(BaseCheck):
 
     @staticmethod
     def _vuln_severity(v: dict) -> str:
-        """Pick severity from fields nikto exposes; default medium."""
+        """Pick severity from fields nikto exposes.
+
+        Classic nikto exposes no `severity`/`risk`/`level` for most of its
+        findings. Defaulting those to `medium` inflates the report with
+        banner-leak / ETag-inode / version-disclosure noise. Default to
+        `info` and only upgrade on high-impact keywords.
+        """
         for key in ("severity", "risk", "level"):
             raw = v.get(key)
             if not raw:
@@ -92,11 +105,16 @@ class NiktoScan(BaseCheck):
             if low in ("critical", "high", "medium", "low", "info"):
                 return low
         msg = (v.get("msg") or v.get("description") or "").lower()
-        if any(k in msg for k in ("rce", "shell", "command execution", "sql injection")):
+        if any(k in msg for k in ("rce", "shell", "command execution",
+                                    "sql injection", "arbitrary code")):
+            return "critical"
+        if any(k in msg for k in ("directory listing", "backup file",
+                                    "exposed .git", "credentials")):
             return "high"
-        if any(k in msg for k in ("directory", "listing", "sensitive")):
+        if any(k in msg for k in ("directory", "listing", "sensitive",
+                                    "outdated", "default page")):
             return "medium"
-        return "medium"
+        return "info"
 
     def execute(self) -> list[Finding]:
         if not which("nikto"):

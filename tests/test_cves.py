@@ -272,5 +272,57 @@ class TestMegaCheckIntegration(unittest.TestCase):
             tmp.cleanup()
 
 
+class TestGrafanaSSRF(unittest.TestCase):
+    def test_detects_differential_connect_refused(self):
+        from scanner.checks.cves.grafana_ssrf import GrafanaSSRF
+        # 1) /login grafana fingerprint, 2) attacker /avatar/https%3A... body
+        # with 'connection refused', 3) benign /avatar/0 body without markers
+        d = GrafanaSSRF(canned_run([
+            (0, wrap_body("Grafana Dashboard login"), ""),
+            (0, wrap_body("tls: connection refused", 500), ""),
+            (0, wrap_body("Not Found", 404), ""),
+        ]))
+        self.assertIsNotNone(d.probe("https://x", baseline_body=""))
+
+    def test_rejects_benign_grafana_500(self):
+        from scanner.checks.cves.grafana_ssrf import GrafanaSSRF
+        # No proxy-level markers in attacker response - no SSRF signal
+        d = GrafanaSSRF(canned_run([
+            (0, wrap_body("Grafana Dashboard"), ""),
+            (0, wrap_body("Internal Server Error", 500), ""),
+            (0, wrap_body("Internal Server Error", 500), ""),
+        ]))
+        self.assertIsNone(d.probe("https://x", baseline_body=""))
+
+    def test_baseline_guard_marker_in_baseline(self):
+        from scanner.checks.cves.grafana_ssrf import GrafanaSSRF
+        # Baseline already carries the marker string - must NOT fire.
+        d = GrafanaSSRF(canned_run([
+            (0, wrap_body("Grafana"), ""),
+            (0, wrap_body("tls: connection refused", 500), ""),
+            (0, wrap_body("Not Found", 404), ""),
+        ]))
+        baseline = "server log: tls: connection refused on upstream"
+        self.assertIsNone(d.probe("https://x", baseline_body=baseline))
+
+
+class TestPhpFpmNginx(unittest.TestCase):
+    def test_detects_php_plus_nginx(self):
+        from scanner.checks.cves.php_fpm_nginx import PhpFpmNginx
+        # Body carries x-powered-by: php; headers probe reports nginx
+        d = PhpFpmNginx(canned_run([
+            (0, wrap_body("X-Powered-By: PHP/7.4\n<html>.php</html>"), ""),
+            (0, wrap_body("Server: nginx/1.18\nContent-Type: text/html"), ""),
+        ]))
+        self.assertIsNotNone(d.probe("https://x", baseline_body=""))
+
+    def test_rejects_non_php_nginx(self):
+        from scanner.checks.cves.php_fpm_nginx import PhpFpmNginx
+        d = PhpFpmNginx(canned_run([
+            (0, wrap_body("<html>Welcome</html>"), ""),
+        ]))
+        self.assertIsNone(d.probe("https://x", baseline_body=""))
+
+
 if __name__ == "__main__":
     unittest.main()

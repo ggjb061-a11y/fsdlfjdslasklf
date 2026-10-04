@@ -2,6 +2,368 @@
 
 Version numbers follow the project's own `scanner/__init__.py::__version__`.
 
+## 4.4.0 (2026-10-04) - params/http_methods baseline FP fixes, expanded JSON, nikto/nuclei hardening, +14 tests
+
+### False-positive fixes
+- `params.py`: 3-sample baseline variance + HTTP status comparison +
+  relative size floor (`max(50, variance*2, body*0.02)`). A single
+  baseline sample used to misfire on every dynamic page (CSRF tokens,
+  timestamps, build hashes) because the page differed from itself by
+  more than 50 bytes on refetch. 404 / 500 / WAF-block responses are
+  no longer counted as 'parameter accepted'.
+- `http_methods.py`: baseline-differential method detection. The old
+  status-only check marked a method 'accepted' on any 2xx/3xx, so
+  SPAs and WAFs that return 200 for every method on `/` produced
+  false 'PUT accepted' / 'DELETE accepted' findings. Now compares
+  Content-Length delta and status class against a GET baseline, and
+  the TRACE XST probe actually looks for a nonce header reflected in
+  the response body (real XST confirmation vs informational).
+- `nikto`: parser now handles the flat-list shape (previously
+  silently dropped), and the default severity for findings with no
+  explicit severity field is `info` instead of `medium`. Banner-leak
+  / version-disclosure findings no longer inflate the report.
+- `nuclei`: `_canonical_sev` extracted and unit-tested. Fixes a
+  crash on `"severity": null` (nuclei emits it on template errors)
+  and maps `informational` / `unknown` to the canonical `info`.
+  `extracted-results` lists are joined line-by-line instead of
+  stringified as `['a', 'b']`.
+
+### Reports
+- `json_report.py` now includes the fields the HTML report shows but
+  the JSON output had silently dropped: `host_records`, `js_endpoints`,
+  `asn_info`, `shodan_info`, `geo_info`, `http_versions`,
+  `owasp_counts`, `total_cvss_estimate`, and full URL records.
+  Findings now use `Finding.to_dict()` so `cvss_estimate`, `owasp`,
+  and `sev_order` land in the artifact. A `TypeError` on
+  serialization now falls back to `repr` and logs a warning instead
+  of killing the whole JSON export mid-write.
+
+### Tests (259 passing, +14 new)
+- `test_more_checks.py`: behavioral tests for SSL/TLS (sslscan +
+  openssl parsing), CORS (ACAO + credentials fires critical; bare
+  wildcard does not), Nikto (3 JSON shapes, severity gating), and
+  Nuclei (`_canonical_sev` null/informational/unknown mapping).
+- `test_cves.py`: Grafana SSRF detector (differential, benign
+  rejection, baseline-guard) and PhpFpmNginx positive + negative.
+
+---
+
+## 4.3.1 (2026-10-04) - Dep CVEs, CSV injection, crawler scope, form safety
+
+### Security
+- `requests` pinned to `>=2.32.3,<3` to pick up CVE-2023-32681
+  (Proxy-Authorization leak, fixed 2.31.0) and CVE-2024-35195
+  (cert-verify bypass on Session reuse, fixed 2.32.0).
+- `Jinja2` pinned to `>=3.1.6,<4` to pick up CVE-2024-22195 (attr XSS,
+  3.1.3), CVE-2024-34064 (xmlattr injection, 3.1.4), and
+  CVE-2024-56326 / CVE-2024-56201 (sandbox escape, 3.1.6).
+- `click` removed from dependencies (never imported; CLI uses argparse).
+- **CSV injection** in `output/csv_report.py`: leading `=`, `+`, `-`,
+  `@`, `\t`, `\r` in a cell are now neutralized with a prepended
+  apostrophe, and `QUOTE_ALL` is set. An attacker-controlled finding
+  title like `=cmd|'/c calc'!A1` no longer executes as a formula
+  when the auditor opens the report in Excel/Sheets.
+- **Crawler deep-crawl scope**: the queue now re-verifies host netloc
+  (equal to target or `.target` suffix) before fetching. `_add_raw`
+  previously only guarded storage; a crawled external link (CDN,
+  analytics, attacker redirect) was still fetched and its body parsed.
+- **form_fuzzer destructive-action guardrail**: skip forms whose
+  action or input name matches a destructive pattern (delete, destroy,
+  logout, transfer, pay, checkout, cancel, revoke, deactivate,
+  resetpassword, changepassword). Also skip CSRF-protected POST forms
+  entirely instead of re-using the valid anti-CSRF token.
+
+### Correctness
+- `grafana_ssrf`: fixed dead-code bug `status in (200,500) and "500"
+  in str(status)` (always evaluated to `status==500`). Probe is now a
+  differential comparison between attacker and benign URLs, requiring
+  connect-level markers (tls:, x509:, connection refused, no such
+  host) baseline-absent per the base-class invariant.
+- `recon_extended` SPF/DMARC parsing:
+  - DMARC `p=none` match boundary-anchored so `p=reject; sp=none`
+    no longer mis-flags.
+  - SPF `all` qualifier parsed by tokenizing the final `all`
+    mechanism; a record ending in bare `all` (no qualifier) now
+    resolves to `+all` per RFC 7208.
+  - SPF `ptr` mechanism flagged as low per RFC 7208 §5.5.
+
+### False-positive fixes
+- `js_analyzer`:
+  - Removed Email Address from SECRET_PATTERNS entirely (noise).
+  - Recalibrated severities to real exploitability:
+    Google API Key high→low, Firebase URL / S3 bucket URL / Stripe
+    test key medium→info, Twilio SID high→low, JWT medium→info.
+  - All patterns anchored with `\b` or negative lookarounds so
+    cache-busting content hashes and minified identifiers no longer
+    trigger.
+  - Generic Secret regex tightened: `token` / `apikey` keys that
+    fired on `csrfToken` / `_token` / i18n keys replaced with a
+    stricter name set + 16-char min of base64/url-safe chars.
+  - LinkFinder regex typo `%%` → `%` fixed.
+- `passive` email extraction boundary-anchored; asset-suffix filter
+  extended (jpeg, svg, webp, ico, avif, css, js, map, woff, woff2,
+  ttf, min.js, min.css, bundle.js); placeholder-domain filter added
+  (example.com / example.org / test.com / localhost).
+- `markdown_report`:
+  - `_md_cell` escapes backticks, pipes, newlines, backslashes,
+    angle brackets. Truncation now happens BEFORE escaping.
+  - Fenced code blocks pick a fence length longer than the longest
+    run of backticks in the content.
+  - URL cells percent-encode `(`, `)`, `<`, `>`, whitespace and wrap
+    the link target in `<...>`.
+- `recon_sources/_helpers`: logger added, default UA moved off a
+  tool-named value WAFs blocklist on sight; `--` separator before
+  URL in curl argv.
+
+### Tests (245 passing)
+- Added negative test asserting CSV injection prefix neutralization.
+- `test_checks_use_constant_canary` fixed: it was a tautology
+  (`cors.__dict__ | {"ATTACKER_CANARY": None}` always contains the
+  key). Replaced with real import check across cors / open_redirect /
+  host_header.
+
+---
+
+## 4.3.0 (2026-10-04) - Secret-redaction, SSRF-tight validators, FP fixes from 20-agent audit
+
+### Security - stop persisting live secrets in reports
+- `jwt_weakness`: emit sha256_prefix+len instead of the cracked
+  secret; for alg=none emit only the header (payload claims are
+  confidential even without a valid signature).
+- `js_analyzer`: mask matched secrets (first4...last4 + sha256_prefix),
+  never persist the raw token in JSSecret.match or Finding.evidence.
+- `session_mgmt`: evidence shows len+entropy, never the cookie value.
+- `csp_cookies`: strip name=value, keep only flag portion.
+- `oauth_saml`: strip code=/access_token=/id_token=/state=/token=
+  values and fragment from Location before persisting.
+- `openapi_fuzzer` / `graphql_deep`: never dump response body on a
+  sensitive-field regex hit — first 300 bytes IS the leaked data.
+- `utils.run`: redact Authorization / Cookie / -u / X-Api-Key values
+  before logging argv on exception.
+
+### Security - validators tightened
+- IPv4-mapped IPv6 (`::ffff:127.0.0.1`) now blocked (stdlib
+  `is_private` does not treat it as private on `IPv6Address`).
+- All `ipaddress` semantic properties checked (private, loopback,
+  link-local, reserved, multicast, unspecified).
+- Single-label internal hostnames blocked by name (localhost,
+  metadata, metadata.google.internal, host.docker.internal, …).
+- userinfo rejected in webhook URLs; length caps (253 / 2048);
+  whitespace rejection; IPv6 zone-id stripped.
+
+### Security - canary & argv injection
+- `ATTACKER_CANARY` was a real `.com` domain. Changed to
+  `attacker.example` (RFC 2606), overridable via `AUTOSCAN_CANARY`.
+- `BaseCheck._curl_args` now emits `--` before every URL.
+
+### Security - HTML report
+- Template `<a href>` runs through a `safe_url` filter that rejects
+  `javascript:` / `data:` / `vbscript:` schemes; `target=_blank`
+  links get `rel="noopener noreferrer"`.
+- All report emitters (reporter / json / markdown / sarif) call
+  `parent.mkdir(parents=True)` and write with `encoding="utf-8"`.
+
+### False-positive fixes
+- `sql_injection` time-based: baseline-relative threshold
+  (`baseline_median + 4s`) with 3-sample median baseline. Slow
+  endpoints no longer FP on absolute 4.5s wait.
+- `sql_injection` UNION probe: differential test between col=1
+  (clean) and col=10 (error). Generic English-phrase bucket
+  excluded (fired on WAF block pages for every payload).
+- `xss`: payload needle now includes the canary token, so minified
+  JS already containing `;alert(` cannot look like confirmed XSS.
+- `crawler` scope: substring host match replaced with netloc
+  suffix check; `evilexample.com` / `notexample.com` no longer admitted.
+- `tech_adaptive` Laravel Ignition: critical → high; requires a
+  Laravel-specific marker instead of the English word "ignition".
+
+### Correctness - BaseCheck helpers
+- `_url` now extends existing query strings via
+  `urlencode(parse_qsl(parsed.query) + [(name, value)])` instead of
+  concatenating a second `?`.
+- `_baseline` is thread-safe (double-checked lock) and does NOT
+  cache empty bodies.
+
+### Correctness - orchestrator
+- `--resume` applies `set_auth` / `set_rate_limit` and runs
+  `--fail-on` (previously `sys.exit(0)` before the gate).
+- `--fail-on` forces JSON into the output format list.
+- Target-dir lookup now uses the same sanitizer as `create_dirs`.
+- `input()` for the authorization prompt handles
+  `KeyboardInterrupt` / `EOFError` cleanly.
+
+### Checkpoint
+- Atomic write via tmp+rename so a SIGINT between phases cannot
+  leave a half-written `.checkpoint.json`.
+
+### Tests (243 passing)
+- PaperCut negative test (patched server redirecting to login page
+  must NOT fire).
+- Struts REST negative test (generic `<orders>` without Struts
+  fingerprint must NOT fire).
+
+---
+
+## 4.2.3 (2026-10-03) - Severity recalibration + FP hardening on CVE detectors
+
+### Severity moderated (endpoint-reachability only, not confirmed exploit)
+- `kibana_source`: critical → info
+  (`/api/status` only shows Kibana is deployed).
+- `spring_gateway`, `weblogic_async`, `weblogic_wls_sec`,
+  `jboss_filter`, `struts_rest`, `wso2_upload`: critical → high.
+
+### FP hardening on weak heuristics
+- `papercut_bypass`: require strong SetupCompleted markers AND
+  absence of login-page markers.
+- `struts_rest`: require TWO distinct markers (Struts fingerprint
+  AND XML `<order>` element).
+- `wso2_upload`: require WSO2-specific marker.
+- `ssrf`: baseline guard so Apache/nginx banners in error pages
+  don't FP.
+- `xxe`: tightened OOB heuristic and demoted to medium (no file
+  content disclosed).
+
+### Follow-ups in the same series
+- `deserialization`: high → medium (blob presence ≠ exploitable).
+- `nosql_injection` + `ldap_injection`: baseline-compare benign
+  login first, so template echoes like `"token": null` don't
+  trigger an auth-bypass finding.
+
+---
+
+## 4.2.2 (2026-10-03) - Complete OWASP mapping (0 unmapped sources)
+
+- Expanded `OWASP_HINTS` with 35 new source mappings covering mail
+  security, DNSSEC, dirbrute, Shodan InternetDB, CMS detect,
+  DNS AXFR, method tester, Follina, Struts2, WebLogic, JBoss,
+  Spring4Shell, Confluence, Shellshock, Log4Shell, F5 BIG-IP, Citrix,
+  PHPUnit, Drupalgeddon, PaperCut, tech_adaptive, Exchange, GitLab,
+  subjack, security.txt, robots, sensitive files, sitemap, GraphQL,
+  OpenSSL, probe, param discovery, JS analyzer, correlator,
+  takeover fingerprint.
+- `owasp_category()` adds CVE-prefix handling and `A05` safe default.
+- Final: 0 unmapped sources across 68 Finding emitters.
+
+---
+
+## 4.2.1 (2026-10-03) - Real-world scan feedback: FP fixes + severity recalibration
+
+### False-positive fixes revealed by scanning ftth.iq
+- **SSTI**: differential probe. `{{7*7}}=49` AND `{{2*5}}=10` must
+  differ. Previously `49` appearing naturally in page UI (page count
+  "page 1 of 49", product count) triggered a critical. 8 payloads
+  with 5-guard chain (baseline / primary / echo / differential /
+  double-confirm) now required.
+- **Command Injection**: added reflection probe before attack
+  probes. If the server echoes URL parameters into HTML, abandon
+  the parameter — can't distinguish exec from echo.
+- **Nikto parsing**: rewrote with `_normalize_vulns` handling 3
+  shapes (modern list, legacy dict with vulnerabilities, flat list).
+  Previously showed `Nikto: ?` with raw JSON blob as detail.
+- `setup.sh` pip fallback chain (pip → `--break-system-packages`
+  → apt).
+
+### Severity recalibration — realistic, not inflated
+- HSTS missing: HIGH → MEDIUM (defensive, needs active MITM on
+  first visit).
+- CSP missing: MEDIUM → LOW (defense-in-depth; XSSCheck already
+  reports actual XSS separately).
+- X-Frame-Options missing: MEDIUM → LOW.
+- Server version disclosure: LOW → INFO.
+- TLSv1.0 enabled: MEDIUM → LOW (deprecated by PCI-DSS, mitigated
+  client-side).
+- Self-signed cert: MEDIUM → LOW (trust-chain, not exploit path).
+- SPF missing / DMARC missing: MEDIUM → LOW.
+- SPF `+all`: HIGH → MEDIUM. DMARC `p=none`: MEDIUM → LOW.
+- SSLv2 / SSLv3 stay HIGH (DROWN / POODLE are real exploits).
+
+---
+
+## 4.2.0 (2026-10-02) - Polish pass: BaseCheck shared helpers, Finding model upgrades, interactive HTML
+
+### Added
+- `BaseCheck` grew shared HTTP helpers used across all 42 checks:
+  `_fetch`, `_fetch_full`, `_fetch_headers`, `_fetch_json`, `_post`,
+  `_url`, `_baseline` (cached), `_status_code` (robust).
+- `Finding` model: `__post_init__` normalizes severity to the
+  canonical set (`critical`/`high`/`medium`/`low`/`info`) and
+  deduplicates tags (lowercase, strip, order-preserving).
+- `Finding.cvss_estimate()` returns approximate CVSS 3.1 base
+  score; `Finding.owasp_category()` maps to OWASP Top 10 2021.
+- `ScanResult.count_by_owasp()`, `count_by_source()`,
+  `total_cvss()`.
+- Interactive HTML report: OWASP mapping table, severity filter
+  buttons, collapsible sections.
+
+### Changed
+- All 42 checks now inherit shared helpers from `BaseCheck` instead
+  of reimplementing `curl` wrappers.
+
+---
+
+## 4.1.0 (2026-10-01) - +8 deep checks, LinkFinder JS extraction, benchmark, pyproject, pre-commit
+
+### Added - 8 deep vulnerability checks
+- `MassAssignmentCheck`: JSON API privilege-field injection
+  (role, is_admin, verified, premium) with differential baseline.
+- `HTTPSmugglingCheck`: CL.TE / TE.CL / TE.TE timing-based with
+  double-confirmation and benign-chunked reverse probe.
+- `JWTWeaknessCheck`: alg=none detection + HS256 weak-secret
+  brute force against a common-secret list.
+- `SessionMgmtCheck`: Shannon-entropy test on session cookies +
+  missing Secure/HttpOnly flags.
+- `GraphQLDeepCheck`: introspection schema dump, field-suggestion
+  disclosure, query batching DoS, alias amplification, unauth
+  sensitive query probing.
+- `OAuthSAMLCheck`: OIDC discovery exposure, redirect_uri wildcard
+  (`attacker.example` canary), missing state parameter, SAML
+  metadata exposure.
+- `PrototypePollutionCheck`: `__proto__[polluted7x7]=marker` with
+  follow-up request to detect persisted pollution.
+- `OpenAPIFuzzerCheck`: fetch OpenAPI spec, probe GET endpoints
+  for unauthenticated access to sensitive fields.
+
+### Added - LinkFinder regex for JS endpoint extraction
+- Extended `js_analyzer` with LinkFinder-style regex for broader
+  path/URL discovery inside bundled JavaScript.
+
+### Added - infra
+- `benchmark.py`: measure elapsed time, finding count, CVSS total.
+- `pyproject.toml`: PEP 621 metadata.
+- Pre-commit hook with ruff + pytest.
+
+---
+
+## 4.0.0 (2026-09-30) - 20 CVE detectors + deep crawler + 8 subdomain sources + bulletproof setup
+
+### Added - 20 flagship CVE detectors (`scanner/checks/cves/`)
+- `apache_2449_pt`, `apache_2450_pt`, `citrix_netscaler`,
+  `elasticsearch_groovy`, `f5_tmui`, `grafana_ssrf`,
+  `jboss_filter`, `kibana_source`, `papercut_bypass`,
+  `php_fpm_nginx`, `rails_accept`, `solr_replication`,
+  `spring_function`, `spring_gateway`, `struts_rest`,
+  `vmware_vcenter`, `weblogic_async`, `weblogic_console`,
+  `weblogic_wls_sec`, `wso2_upload`.
+- Each detector lives in its own module, is instantiated by
+  `CVEMegaCheck`, must consult the baseline body before firing,
+  and uses marker-based or distinctive-string evidence.
+
+### Added - deep crawler (`scanner/crawler.py`)
+- 7 sources: live, Wayback, gau, hakrawler, katana, GoSpider,
+  deep BFS from recon seeds.
+- Common-paths probe, URL de-dup, interesting-path tagger
+  (login / sensitive / API).
+
+### Added - 8 subdomain sources (`scanner/recon_sources/`)
+- subfinder, assetfinder, amass passive, chaos, crtsh,
+  bufferover, hackertarget, alienvault, certspotter, urlscan.
+
+### Added - bulletproof `setup.sh`
+- 3-step fallback (pip → `--break-system-packages` → apt system
+  package) and retry wrapper for `go install`.
+
+---
+
 ## 3.5.0 (2026-10-03) - sqlmap integration (second-stage SQLi confirmation)
 
 ### Added
