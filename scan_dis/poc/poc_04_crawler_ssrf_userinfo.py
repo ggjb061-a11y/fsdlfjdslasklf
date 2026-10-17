@@ -23,7 +23,7 @@ if str(ROOT) not in sys.path:
 
 from _common import Recorder, report  # noqa: E402
 from scanner import utils             # noqa: E402
-from scanner.crawler import Crawler   # noqa: E402
+from scanner.crawler import CrawlerModule  # noqa: E402
 
 BEARER = "VICTIM-BEARER-7c9a"
 
@@ -42,8 +42,8 @@ def main() -> int:
     ssrf_url = f"http://127.0.0.1:x@127.0.0.1:{P2}/ssrf-hit"
 
     # ── 1. scope check bypass ────────────────────────────────────────────────
-    crawler = Crawler(target="127.0.0.1", live_hosts=[stub_target.url],
-                      config={}, findings=[])
+    crawler = CrawlerModule(target="127.0.0.1", dirs={},
+                            live_hosts=[stub_target.url], threads=1)
     crawler._add_raw(ssrf_url, "test")
     scope_bypassed = ssrf_url in crawler.raw_urls
 

@@ -19,7 +19,7 @@ corrupting the report or deceiving a reader.
 No external network traffic; the markdown generator runs in-process.
 """
 import sys
-from io import StringIO
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,8 +37,9 @@ INJECTED_EMAIL   = "# INJECTED VIA EMAIL FIELD"
 
 
 def main() -> int:
+    tmp = tempfile.mkdtemp(prefix="poc06_")
     # Build a minimal ScanResult with a poisoned JS endpoint and email
-    result = ScanResult(target="example.com")
+    result = ScanResult(target="example.com", scan_date="2026-01-01", base_dir=tmp)
     result.js_endpoints = [
         "/api/legit",
         f"/api/normal\n{INJECTED_HEADING}",   # endpoint with embedded newline
@@ -48,21 +49,19 @@ def main() -> int:
         f"valid@example.com\n{INJECTED_EMAIL}",
     ]
 
-    # Generate markdown in-memory
-    md_text = generate_markdown(result)
+    # generate_markdown writes the file and returns the path
+    report_path = generate_markdown(result)
+    md_text = Path(report_path).read_text()
 
     endpoint_injected = INJECTED_HEADING in md_text
     email_injected    = INJECTED_EMAIL   in md_text
 
-    # Also verify: a well-formed endpoint does NOT create a heading
-    control_safe = "# INJECTED" not in md_text.split("# ")[0]  # before first injection
-
     confirmed = endpoint_injected and email_injected
+    snippet = repr(INJECTED_HEADING[:40])
     detail = (
         f"endpoint_injection={endpoint_injected} | "
         f"email_injection={email_injected} | "
-        f"injected_heading_appears_in_report: "
-        f"{INJECTED_HEADING!r[:40]} found={INJECTED_HEADING in md_text}"
+        f"injected_heading_appears_in_report: {snippet} found={INJECTED_HEADING in md_text}"
     )
     return _report(
         "PoC-06",

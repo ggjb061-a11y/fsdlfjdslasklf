@@ -43,6 +43,7 @@ def main() -> int:
         "title":    FAKE_TITLE,
         "severity": "critical",
         "source":   "rce",
+        "host":     "example.com",
         "url":      "https://example.com/rce",
         "detail":   "Injected by attacker",
         "tags":     ["rce"],
@@ -63,7 +64,7 @@ def main() -> int:
 
     # ── restore ───────────────────────────────────────────────────────────────
     mgr    = CheckpointManager(str(tmp))
-    result = ScanResult(target="example.com")
+    result = ScanResult(target="example.com", scan_date="2026-01-01", base_dir=str(tmp))
     mgr.restore_result(result)
 
     fake_in_findings = any(f.title == FAKE_TITLE for f in result.findings)

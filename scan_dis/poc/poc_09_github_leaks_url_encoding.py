@@ -57,8 +57,8 @@ def main() -> int:
     try:
         with patch.object(utils, "run", side_effect=capturing_run):
             # Import after patching so the module picks up the patched run
-            from scanner.checks.github_leaks import GithubLeaksCheck
-            check = GithubLeaksCheck("example.com", {}, [])
+            from scanner.checks.github_leaks import GitHubLeaksCheck
+            check = GitHubLeaksCheck("example.com", {}, [])
             check._api_search(DORK_QUERY)
     finally:
         if env_backup is None:
